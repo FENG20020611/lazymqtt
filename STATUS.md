@@ -237,11 +237,18 @@ passes against them. Docker has never run on the development machine, so
 Ordered by value.
 
 ### 1. A real soak run — the last MVP acceptance criterion
-Everything else in §19 is proven. The heap ceiling is asserted over one
-*simulated* minute in `internal/ui/bench_test.go`, which is enough to prove the
-caps bound growth but not enough to catch slow accumulation. The §19 criterion
-is an hour at 5,000 msg/s over 500 topics, under 100 MB RSS, with input latency
-you cannot perceive:
+Everything else in §19 is proven. The app has now been driven by hand for an
+extended local session against the dev broker, roughly 15,000 messages in
+total, with no misbehaviour — which is real evidence that it works, but not
+this criterion: 15,000 messages over a long session is a few messages a second,
+and the failure this test is looking for is what sustained throughput does to
+memory over an hour.
+
+The heap ceiling is asserted over one *simulated* minute in
+`internal/ui/bench_test.go`, which is enough to prove the caps bound growth but
+not enough to catch slow accumulation. The §19 criterion is an hour at
+5,000 msg/s over 500 topics, under 100 MB RSS, with input latency you cannot
+perceive:
 
 ```
 docker compose -f deploy/docker-compose.yml up -d
