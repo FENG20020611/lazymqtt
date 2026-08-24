@@ -1,0 +1,14 @@
+# The configuration the README demo records against.
+#
+# It lives beside the tape so the recording does not depend on whoever runs it
+# having a particular ~/.config/lazymqtt/config.yaml — a personal config with a
+# stale key turns the GIF into a screenshot of a parse error rather than a demo.
+version: 1
+
+brokers:
+  demo:
+    host: localhost
+    port: 1883
+    subscriptions:
+      - filter: "#"
+        qos: 0

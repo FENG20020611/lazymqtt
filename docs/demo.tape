@@ -8,6 +8,11 @@
 # container publishes a retained tree under `home/`, `devices/` and `sensors/`,
 # so the topic tree fills in on its own and nothing here has to fake data.
 #
+# It passes --config docs/demo-config.yaml on purpose. Left to the discovery
+# chain it would pick up whatever is in ~/.config/lazymqtt, and a personal
+# config that fails to parse records a GIF of the error message instead of the
+# app.
+#
 # Keep it under about 30 seconds. A README GIF that loops before the reader has
 # finished the paragraph next to it is the one that gets watched.
 
@@ -27,7 +32,7 @@ Set TypingSpeed 60ms
 Set Framerate 12
 
 Hide
-Type "./bin/lazymqtt -b tcp://localhost:1883 -t '#'"
+Type "./bin/lazymqtt --config docs/demo-config.yaml -b demo"
 Enter
 Sleep 3s
 Show
