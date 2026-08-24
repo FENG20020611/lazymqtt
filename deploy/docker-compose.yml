@@ -26,9 +26,17 @@ services:
       - /bin/sh
       - -c
       - |
+        set -e
         touch /mosquitto/config/passwd
-        chmod 0700 /mosquitto/config/passwd
         mosquitto_passwd -b /mosquitto/config/passwd lazymqtt secret
+        # This script runs as root, but mosquitto drops privileges to the
+        # `mosquitto` user before it reads the password file — so a file left
+        # owned by root is unreadable at exactly the moment it is needed, and
+        # the broker exits with `Unable to open pwfile`. Ownership has to
+        # follow the process, not the script. chown after mosquitto_passwd:
+        # it rewrites the file rather than editing it in place.
+        chown mosquitto:mosquitto /mosquitto/config/passwd
+        chmod 0600 /mosquitto/config/passwd
         exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
 
   # Publishes a realistic retained topic tree so a fresh checkout shows

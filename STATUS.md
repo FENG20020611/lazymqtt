@@ -215,7 +215,14 @@ which does not exist yet.
 listeners, a second password-protected broker on 1884 whose password file is
 generated at startup so no hash is committed, and a seed container publishing a
 realistic retained tree), mosquitto configs, and `deploy/certs/gen.sh`.
-**Never run.**
+
+**Partially verified, in CI rather than locally.** The integration job now
+brings this stack up, and the first run exposed two file-permission bugs that
+had been latent since the stack was written — see "Fixed after the hardening
+pass". The plain broker on 1883 answers in about a second. Still unconfirmed:
+that the TLS, mTLS and auth listeners actually accept a connection, and that
+the suite passes against them. Docker has never run on the development
+machine, so `make dev` and `make test-int` remain unexercised.
 
 ---
 
@@ -413,6 +420,21 @@ Two items the Phase 9 review turned up, both correctness rather than polish.
     identifier on the packet rather than per filter. That costs a round trip
     per filter on the reconnect replay and removes the request/reason-code
     index matching, which was the fiddly part of the old code.
+
+- **The dev stack could never have started its TLS or auth listeners.** Two
+  bugs of the same shape, both found the first time CI actually ran the compose
+  file, and both invisible on macOS because Docker Desktop virtualises file
+  ownership:
+  - The auth broker generated its password file as root at mode 0700, then
+    mosquitto dropped privileges to the `mosquitto` user and could not read it
+    — `Unable to open pwfile`, container exits. Ownership now follows the
+    process rather than the script that created the file.
+  - `deploy/certs/gen.sh` left keys at openssl's default 0600, owned by the
+    developer, and mosquitto reads them through a read-only mount as uid 1883.
+    Unreadable keys mean it starts *without* its TLS listeners, which is the
+    worse failure: the broker looks healthy and only the TLS tests fail. The
+    script now marks them 0644, which is fine for throwaway certificates that
+    `.gitignore` keeps out of the repository.
 
 **The overlap behaviour is unverified against a real broker.** MQTT 5 §3.3.4
 lets a broker send either one copy carrying every matching identifier or one

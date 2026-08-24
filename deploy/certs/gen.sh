@@ -26,4 +26,12 @@ EXT
   rm -f "$name.csr"
 done
 
+# mosquitto reads these through a read-only bind mount and drops privileges to
+# the `mosquitto` user, which is not the user that ran this script. openssl
+# writes keys 0600, so the broker cannot read them and silently starts without
+# its TLS listeners. These are throwaway certificates for `make dev` — the
+# .gitignore keeps them out of the repository — so world-readable is fine and
+# is the difference between the TLS listeners working and not.
+chmod 0644 ./*.pem
+
 echo "wrote ca.pem, server.pem, server-key.pem, client.pem, client-key.pem"
