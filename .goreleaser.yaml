@@ -81,6 +81,43 @@ changelog:
     - title: Other
       order: 999
 
+# Homebrew is a cask rather than a formula: Homebrew deprecated binary-only
+# formulae, and goreleaser deprecated `brews:` to match. The tap lives at
+# github.com/Onizuka893/homebrew-tap, so `brew install Onizuka893/tap/lazymqtt`
+# works without adding the tap first.
+homebrew_casks:
+  - name: lazymqtt
+    ids: [lazymqtt]
+    binaries: [lazymqtt]
+    homepage: "https://github.com/Onizuka893/lazymqtt"
+    description: "A keyboard-driven TUI MQTT client, in the spirit of lazygit"
+    license: "MIT"
+    # A prerelease must not become what `brew install lazymqtt` gives people.
+    # `auto` skips the tap update for any version goreleaser treats as a
+    # prerelease, which is the same rule `release.prerelease: auto` uses.
+    skip_upload: auto
+    repository:
+      owner: Onizuka893
+      name: homebrew-tap
+      branch: main
+      # A repo-scoped PAT for the tap repository. The default GITHUB_TOKEN is
+      # scoped to this repository only and cannot push to the tap.
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: goreleaser
+      email: noreply@github.com
+    commit_msg_template: "lazymqtt {{ .Tag }}"
+    hooks:
+      post:
+        install: |
+          # The binary is unsigned, so a downloaded archive carries the
+          # quarantine attribute and Gatekeeper refuses to run it. Without
+          # this, `brew install` succeeds and the first `lazymqtt` fails with
+          # a dialog that says nothing useful.
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/lazymqtt"]
+          end
+
 release:
   draft: false
   prerelease: auto
@@ -88,22 +125,28 @@ release:
   footer: |
     ## Install
 
-    **Homebrew is not set up yet.** Download the archive for your platform,
-    verify it against `checksums.txt`, and put the binary on your `PATH`:
+    Homebrew (macOS and Linux):
+
+    ```sh
+    brew install Onizuka893/tap/lazymqtt
+    ```
+
+    From source:
+
+    ```sh
+    go install github.com/Onizuka893/lazymqtt/cmd/lazymqtt@{{ .Tag }}
+    ```
+
+    Or download the archive for your platform, verify it against
+    `checksums.txt`, and put the binary on your `PATH`:
 
     ```sh
     tar -xzf lazymqtt_{{ .Version }}_macOS_arm64.tar.gz
     install -m 0755 lazymqtt /usr/local/bin/lazymqtt
     ```
 
-    Or build from source:
-
-    ```sh
-    go install github.com/Onizuka893/lazymqtt/cmd/lazymqtt@{{ .Tag }}
-    ```
-
-    On macOS the binary is unsigned, so Gatekeeper will quarantine a
-    downloaded archive. Clear it with:
+    On macOS a downloaded binary is unsigned, so Gatekeeper quarantines it —
+    the Homebrew cask clears that for you, a manual install does not:
 
     ```sh
     xattr -d com.apple.quarantine /usr/local/bin/lazymqtt

@@ -32,3 +32,8 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A repo-scoped PAT with write access to Onizuka893/homebrew-tap.
+          # The default GITHUB_TOKEN cannot push to another repository, so
+          # without this secret the cask step fails after the release has
+          # already been published — see docs/releasing.md.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

@@ -17,7 +17,7 @@ PAYLOAD  ?= 256
 DURATION ?= 60s
 PATTERN  ?= steady
 
-.PHONY: build run dev test test-int test-short bench golden lint fmt vuln certs loadgen snapshot clean
+.PHONY: build run dev test test-int test-short bench golden lint fmt vuln certs loadgen snapshot release-check demo clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/$(BINARY) ./cmd/$(BINARY)
@@ -75,8 +75,19 @@ loadgen:
 	go run ./cmd/mqttload --broker $(BROKER) --rate $(RATE) --topics $(TOPICS) \
 		--payload $(PAYLOAD) --duration $(DURATION) --pattern $(PATTERN)
 
+# Records the README demo against the dev broker. Needs vhs (which needs ttyd
+# and ffmpeg) and the compose stack already up, because the tape drives the
+# real binary against the real seeded tree rather than faking data.
+demo: build
+	vhs docs/demo.tape
+
 snapshot:
 	goreleaser release --snapshot --clean
+
+# Validates .goreleaser.yaml without building anything. Cheap enough to run
+# before every push that touches it; CI proves the rest with release-dry-run.
+release-check:
+	goreleaser check
 
 clean:
 	rm -rf bin dist
