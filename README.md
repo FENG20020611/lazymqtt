@@ -3,6 +3,8 @@
 A keyboard-driven TUI MQTT client, in the spirit of lazygit and lazydocker.
 Single static binary, Linux and macOS.
 
+![lazymqtt](docs/demo.gif)
+
 > **Status: v0.x, pre-release.** The config schema is not yet stable — don't
 > build tooling on it. See [STATUS.md](STATUS.md) for what is implemented,
 > what is verified, and what is still missing.

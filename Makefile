@@ -76,9 +76,19 @@ loadgen:
 		--payload $(PAYLOAD) --duration $(DURATION) --pattern $(PATTERN)
 
 # Records the README demo against the dev broker. Needs vhs (which needs ttyd
-# and ffmpeg) and the compose stack already up, because the tape drives the
-# real binary against the real seeded tree rather than faking data.
+# and ffmpeg) and the compose stack up, because the tape drives the real binary
+# against the real seeded tree rather than faking data.
+#
+# The broker check is not ceremony: with nothing listening the tape records a
+# perfectly good GIF of an empty app stuck on "reconnecting…", and you do not
+# find out until you open the result.
 demo: build
+	@docker compose -f deploy/docker-compose.yml exec -T mosquitto \
+		mosquitto_pub -h localhost -t vhs/ready -m ok >/dev/null 2>&1 || { \
+		echo "the dev broker is not answering on 1883."; \
+		echo "run: make certs && docker compose -f deploy/docker-compose.yml up -d"; \
+		echo "(without certs the broker cannot load ca.pem and exits at startup)"; \
+		exit 1; }
 	vhs docs/demo.tape
 
 snapshot:

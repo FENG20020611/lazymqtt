@@ -58,14 +58,26 @@ Sleep 2s
 Escape
 Type "p"
 Sleep 800ms
+# The modal seeds the topic from the tree selection and the payload from the
+# last publish to that topic, so both fields are cleared before typing —
+# otherwise the typing is appended and the topic comes out as nonsense.
+Ctrl+U
 Type "home/kitchen/lights/set"
 Tab
+Ctrl+U
 # Single quotes: VHS has no escape sequences inside a double-quoted string,
 # so a JSON payload has to be quoted the other way round.
 Type '{"on": true, "brightness": 80}'
 Sleep 1.5s
 Ctrl+S
-Sleep 2.5s
+Sleep 2s
+
+# That message comes straight back on the `#` subscription and is now the
+# newest in the list. Jumping to it puts a JSON payload in the detail pane,
+# which is where the pretty-printing and the syntax highlighting show.
+Type "2"
+Type "g"
+Sleep 3s
 
 # Filter, then clear it.
 Type "/"

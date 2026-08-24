@@ -259,19 +259,7 @@ dry-run on every push, and `docs/configuration.md` is the documented config
 reference. What is left is the Homebrew tap and the tag; see "Phase 10
 progress" below.
 
-### 3. Record the demo GIF
-`docs/demo.tape` and `make demo` are in place; the recording itself needs
-`vhs` (which needs `ttyd` and `ffmpeg`) and the compose stack up, neither of
-which has ever run on the development machine. Once `docs/demo.gif` exists,
-add it under the README's opening paragraph:
-
-```markdown
-![lazymqtt](docs/demo.gif)
-```
-
-The golden frames in `internal/ui/testdata` are the stand-in until then.
-
-### 4. Not blocking
+### 3. Not blocking
 - A `pprof` pass against the render path. `BenchmarkRenderFrame` is ~1 ms per
   frame with ~9,700 allocations against a 50 ms budget, so this is not urgent —
   but nearly all of those allocations are per-row `lipgloss.Style.Render` calls,
@@ -281,7 +269,7 @@ The golden frames in `internal/ui/testdata` are the stand-in until then.
 - The rough edges below: credentials in a bare `--broker` URL, an in-TUI masked
   password prompt for the broker picker, a persisted subscription set.
 
-### 5. Deferred by design
+### 4. Deferred by design
 The MQTT 3.1.1 adapter (`internal/mqtt/paho3`) with `protocol: auto`
 negotiation on CONNACK `0x84`, and everything in the §20 roadmap. The port
 interface and the `version`/`protocol` config field are already in place for
@@ -312,6 +300,16 @@ Done:
   checklist, how to verify a release, and what to do about a bad tag.
 - **`make release-check`** (`goreleaser check`), and the config now validates
   clean with no deprecation warnings against goreleaser v2.
+- **`docs/demo.gif` is recorded and in the README** (§Phase 9's "done when",
+  finally). `make demo` re-records it from `docs/demo.tape`, and refuses to
+  run when the broker is not answering — with nothing listening the tape
+  records a perfectly good GIF of an empty app stuck on "reconnecting…", and
+  you only find out when you open the result. The tape passes
+  `--config docs/demo-config.yaml` for the same class of reason: left to the
+  discovery chain it picks up whoever's personal config, and the first real
+  run recorded the parse error from a stale `redact_payloads` key.
+  The version line in the help overlay reads a dirty commit hash rather than
+  a tag; worth re-recording once `v0.1.0` exists.
 
 Left:
 
@@ -323,7 +321,6 @@ Left:
   step fails, which is the annoying half-done state worth avoiding.
 - **Tag `v0.1.0`.** Ideally after the soak run, since that is the §19
   acceptance criterion and the README claims bounded memory.
-- **Record `docs/demo.gif`** and add it to the README.
 - **Verify both install paths** print the tagged version rather than `dev`.
 
 ---
