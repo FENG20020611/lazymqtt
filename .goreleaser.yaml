@@ -1,0 +1,110 @@
+version: 2
+
+project_name: lazymqtt
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod download
+
+builds:
+  - id: lazymqtt
+    main: ./cmd/lazymqtt
+    binary: lazymqtt
+    # A single static binary is the whole distribution story: no cgo, no
+    # runtime dependency, no MQTT library to install alongside it.
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/Onizuka893/lazymqtt/internal/version.Version={{ .Version }}
+      - -X github.com/Onizuka893/lazymqtt/internal/version.Commit={{ .FullCommit }}
+      - -X github.com/Onizuka893/lazymqtt/internal/version.Date={{ .CommitDate }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      # Windows on arm64 is untested terminal territory; the amd64 build is
+      # already best-effort.
+      - goos: windows
+        goarch: arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: lazymqtt
+    ids: [lazymqtt]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- if eq .Os "darwin" }}macOS{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+      - src: deploy/**/*
+        dst: deploy
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Other
+      order: 999
+
+release:
+  draft: false
+  prerelease: auto
+  mode: replace
+  footer: |
+    ## Install
+
+    **Homebrew is not set up yet.** Download the archive for your platform,
+    verify it against `checksums.txt`, and put the binary on your `PATH`:
+
+    ```sh
+    tar -xzf lazymqtt_{{ .Version }}_macOS_arm64.tar.gz
+    install -m 0755 lazymqtt /usr/local/bin/lazymqtt
+    ```
+
+    Or build from source:
+
+    ```sh
+    go install github.com/Onizuka893/lazymqtt/cmd/lazymqtt@{{ .Tag }}
+    ```
+
+    On macOS the binary is unsigned, so Gatekeeper will quarantine a
+    downloaded archive. Clear it with:
+
+    ```sh
+    xattr -d com.apple.quarantine /usr/local/bin/lazymqtt
+    ```

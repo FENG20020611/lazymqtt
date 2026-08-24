@@ -1,0 +1,38 @@
+# Build output. Anchored to the repo root: an unanchored `lazymqtt` would
+# also match the cmd/lazymqtt/ package directory.
+/bin/
+/dist/
+/lazymqtt
+/mqttload
+
+# Go
+*.exe
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Fuzzing corpora grow without bound; the seed corpus lives in testdata/ and
+# is committed, this is only the machine-local cache.
+/**/testdata/fuzz/
+
+# Development certificates from `make certs`. Never commit a private key,
+# not even a throwaway one — it teaches the wrong habit and trips secret
+# scanners.
+/deploy/certs/*.pem
+/deploy/certs/*.key
+/deploy/certs/*.csr
+/deploy/certs/*.srl
+/deploy/mosquitto/passwd
+
+# Local runtime state and logs
+*.log
+/lazymqtt.yaml
+/config.yaml
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~

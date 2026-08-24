@@ -1,0 +1,36 @@
+version: "2"
+
+linters:
+  enable:
+    - depguard
+    - errcheck
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - unconvert
+    - unused
+
+  settings:
+    depguard:
+      rules:
+        # The dependency direction is ui -> app -> {store, mqtt, config}.
+        # An import of the TUI toolkit inside the domain layer is what would
+        # quietly turn "unit test MQTT without a terminal" from a property of
+        # the design into a matter of discipline.
+        domain-has-no-tui:
+          files:
+            - "**/internal/mqtt/**"
+            - "**/internal/store/**"
+            - "**/internal/config/**"
+          deny:
+            - pkg: charm.land
+              desc: the domain layer must not import the TUI toolkit
+            - pkg: github.com/Onizuka893/lazymqtt/internal/ui
+              desc: the domain layer must not import the UI
+            - pkg: github.com/Onizuka893/lazymqtt/internal/app
+              desc: the domain layer must not import the app seam
+
+formatters:
+  enable:
+    - gofumpt

@@ -1,0 +1,42 @@
+# Local development brokers. `make dev` brings these up and starts the TUI.
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: lazymqtt-mosquitto
+    ports:
+      - "1883:1883"   # plain
+      - "8883:8883"   # TLS (needs `make certs`)
+      - "9001:9001"   # websockets
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./certs:/mosquitto/certs:ro
+
+  # A second broker requiring a password, for exercising the credential
+  # chain. Credentials: lazymqtt / secret. The password file is generated at
+  # startup so no hash is committed.
+  mosquitto-auth:
+    image: eclipse-mosquitto:2
+    container_name: lazymqtt-mosquitto-auth
+    ports:
+      - "1884:1883"
+    volumes:
+      - ./mosquitto/mosquitto-auth.conf:/mosquitto/config/mosquitto.conf:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        touch /mosquitto/config/passwd
+        chmod 0700 /mosquitto/config/passwd
+        mosquitto_passwd -b /mosquitto/config/passwd lazymqtt secret
+        exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
+
+  # Publishes a realistic retained topic tree so a fresh checkout shows
+  # something interesting within seconds.
+  seed:
+    image: eclipse-mosquitto:2
+    depends_on:
+      - mosquitto
+    entrypoint: ["/bin/sh", "/seed.sh"]
+    volumes:
+      - ./mosquitto/seed.sh:/seed.sh:ro
+    restart: "no"
