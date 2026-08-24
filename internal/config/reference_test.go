@@ -80,9 +80,6 @@ func TestDocumentedDefaults(t *testing.T) {
 		if got := d.Logging.File; got != "" {
 			t.Errorf("file = %q, want empty", got)
 		}
-		if !d.Logging.RedactPayloads {
-			t.Error("redact_payloads = false, want true")
-		}
 	})
 }
 

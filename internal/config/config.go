@@ -82,9 +82,8 @@ func (u UI) Refresh() time.Duration { return time.Duration(u.RefreshMS) * time.M
 // Logging configures slog. Note that a file is the only destination: writing
 // to stdout while the alt screen is up corrupts the display.
 type Logging struct {
-	Level          string `yaml:"level"`
-	File           string `yaml:"file"`
-	RedactPayloads bool   `yaml:"redact_payloads"`
+	Level string `yaml:"level"`
+	File  string `yaml:"file"`
 }
 
 // TLS is the per-broker TLS block.
@@ -149,7 +148,7 @@ func Default() Config {
 			Theme:           "auto",
 			StartPanel:      "topics",
 		},
-		Logging: Logging{Level: "warn", RedactPayloads: true},
+		Logging: Logging{Level: "warn"},
 		Brokers: map[string]Broker{},
 	}
 }

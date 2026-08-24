@@ -62,9 +62,6 @@ func TestLoadGoodConfig(t *testing.T) {
 	if cfg.Limits.StreamHistory != 2000 {
 		t.Fatalf("stream_history default lost: %d", cfg.Limits.StreamHistory)
 	}
-	if !cfg.Logging.RedactPayloads {
-		t.Fatal("redact_payloads must default to true")
-	}
 	if got := cfg.Names(); strings.Join(got, ",") != "local,prod" {
 		t.Fatalf("Names = %v", got)
 	}
@@ -426,5 +423,47 @@ func TestTLSDisabledLeavesTheSchemeAlone(t *testing.T) {
 	b := Broker{Name: "t", URL: "mqtt://h:1883"}
 	if got, _ := b.ServerURL(); got != "tcp://h:1883" {
 		t.Fatalf("ServerURL = %q, want tcp://h:1883", got)
+	}
+}
+
+// MQTT 3.1.1 parses but cannot be honoured: only the v5 adapter ships. A
+// config asking for it must be refused rather than silently connecting with
+// v5, which looks like success and teaches the user the wrong thing about
+// their broker.
+func TestProtocol311IsRefused(t *testing.T) {
+	cfg := Default()
+	cfg.Defaults.Protocol = "3.1.1"
+	err := Validate(&cfg)
+	if err == nil {
+		t.Fatal("protocol 3.1.1 was accepted")
+	}
+	if !strings.Contains(err.Error(), "not supported") {
+		t.Errorf("error does not explain why: %v", err)
+	}
+
+	for _, ok := range []string{"", "auto", "5", "5.0"} {
+		cfg := Default()
+		cfg.Defaults.Protocol = ok
+		if err := Validate(&cfg); err != nil {
+			t.Errorf("protocol %q was rejected: %v", ok, err)
+		}
+	}
+}
+
+// A key that used to exist gets a hint rather than a bare "unknown field",
+// which sends the reader hunting for a typo that is not there.
+func TestRemovedKeysExplainThemselves(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	body := "version: 1\nlogging:\n  level: warn\n  redact_payloads: true\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("a removed key was accepted")
+	}
+	if !strings.Contains(err.Error(), "never did anything") {
+		t.Errorf("no hint for a removed key:\n%v", err)
 	}
 }

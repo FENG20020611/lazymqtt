@@ -51,9 +51,7 @@ func Validate(cfg *Config) error {
 func Check(cfg *Config) *Problems {
 	p := &Problems{}
 
-	if !validProtocol(cfg.Defaults.Protocol) {
-		p.errorf("defaults.protocol: %q is not one of auto, 5, 3.1.1", cfg.Defaults.Protocol)
-	}
+	checkProtocol(p, "defaults", cfg.Defaults.Protocol)
 	checkSubscriptions(p, "defaults", cfg.Defaults.Subscriptions)
 
 	if cfg.Limits.MaxTopics != 0 && cfg.Limits.MaxTopics < 100 {
@@ -102,9 +100,7 @@ func checkBroker(p *Problems, name string, b Broker) {
 	if b.Port < 0 || b.Port > 65535 {
 		p.errorf("%s.port: %d is not a valid port", where, b.Port)
 	}
-	if b.Protocol != "" && !validProtocol(b.Protocol) {
-		p.errorf("%s.protocol: %q is not one of auto, 5, 3.1.1", where, b.Protocol)
-	}
+	checkProtocol(p, where, b.Protocol)
 	if b.Scheme != "" && !validScheme(b.Scheme) {
 		p.errorf("%s.scheme: %q is not one of tcp, tls, ssl, mqtt, mqtts, ws, wss", where, b.Scheme)
 	}
@@ -152,12 +148,22 @@ func checkSubscriptions(p *Problems, where string, subs []Subscription) {
 	}
 }
 
-func validProtocol(s string) bool {
-	switch s {
-	case "", "auto", "5", "5.0", "3.1.1", "311", "3":
-		return true
+// checkProtocol rejects a protocol this build cannot honour.
+//
+// Only the MQTT 5 adapter ships. Accepting `3.1.1` and connecting with v5
+// anyway is worse than refusing: the connection succeeds, so nothing looks
+// wrong, and the user concludes their broker speaks v5. `auto` is accepted
+// because "the best protocol available" is v5 today and stays correct when a
+// 3.1.1 adapter lands (§12.2, and the config reference).
+func checkProtocol(p *Problems, where, proto string) {
+	switch proto {
+	case "", "auto", "5", "5.0":
+	case "3.1.1", "311", "3":
+		p.errorf("%s.protocol: MQTT 3.1.1 is not supported by this build; "+
+			"remove the key or set it to 5", where)
+	default:
+		p.errorf("%s.protocol: %q is not one of auto or 5", where, proto)
 	}
-	return false
 }
 
 func validScheme(s string) bool {

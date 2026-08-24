@@ -62,6 +62,26 @@ func DefaultPath() string {
 // reason, and this is the same mistake.
 var ErrPermissive = errors.New("config file with a literal password is group- or world-readable")
 
+// removed lists config keys that once existed and no longer do, with the
+// reason. An unknown-field error naming one of these is almost certainly an
+// older config rather than a typo, and "unknown field" alone sends the reader
+// looking for a misspelling that is not there.
+var removed = map[string]string{
+	"redact_payloads": "logging.redact_payloads was removed in v0.1.0: no log " +
+		"call at any level records a payload, so the key never did anything. " +
+		"Delete the line.",
+}
+
+func removedKeyHint(err error) string {
+	msg := err.Error()
+	for key, hint := range removed {
+		if strings.Contains(msg, key) {
+			return "hint: " + hint
+		}
+	}
+	return ""
+}
+
 // Load reads and validates a config. An empty path yields Default() with no
 // error: missing config is not an error.
 func Load(path string) (Config, error) {
@@ -78,6 +98,10 @@ func Load(path string) (Config, error) {
 	}
 	// Unmarshal onto the defaults so unset blocks keep their built-in values.
 	if err := yaml.UnmarshalWithOptions(raw, &cfg, yaml.DisallowUnknownField()); err != nil {
+		if hint := removedKeyHint(err); hint != "" {
+			return cfg, fmt.Errorf("parsing %s:\n%s\n%s", path,
+				yaml.FormatError(err, false, true), hint)
+		}
 		return cfg, fmt.Errorf("parsing %s:\n%s", path, yaml.FormatError(err, false, true))
 	}
 	cfg.Path = path
@@ -161,7 +185,7 @@ defaults:
   keepalive: 30s
   connect_timeout: 10s
   clean_start: true
-  protocol: auto          # auto | 5 | 3.1.1
+  protocol: auto          # auto | 5 (MQTT 3.1.1 is not supported yet)
   subscriptions:
     - filter: "#"
       qos: 0
@@ -182,7 +206,6 @@ ui:
 logging:
   level: warn             # debug | info | warn | error
   file: ""                # empty = no file logging; never stdout
-  redact_payloads: true
 
 brokers:
   local:
