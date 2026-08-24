@@ -53,7 +53,9 @@ Type "p"
 Sleep 800ms
 Type "home/kitchen/lights/set"
 Tab
-Type "{\"on\": true, \"brightness\": 80}"
+# Single quotes: VHS has no escape sequences inside a double-quoted string,
+# so a JSON payload has to be quoted the other way round.
+Type '{"on": true, "brightness": 80}'
 Sleep 1.5s
 Ctrl+S
 Sleep 2.5s
@@ -71,5 +73,7 @@ Type "?"
 Sleep 3s
 
 Hide
+# Escape closes the help overlay first: `q` inside a mode is a literal `q`,
+# not a quit.
+Escape
 Type "q"
-Enter
