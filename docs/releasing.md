@@ -17,9 +17,24 @@ first release commits `Casks/lazymqtt.rb` into it.
 ### 2. The tap token
 
 The workflow's default `GITHUB_TOKEN` is scoped to *this* repository and cannot
-push to the tap. Create a fine-grained personal access token with
-**Contents: read and write** on `homebrew-tap` only, and add it to this
-repository as the secret `HOMEBREW_TAP_GITHUB_TOKEN`.
+push to the tap, so the cask step needs a token of its own.
+
+Create it at <https://github.com/settings/personal-access-tokens/new>:
+
+- Resource owner `Onizuka893`
+- Repository access: **only select repositories** → `homebrew-tap`
+- Repository permissions → **Contents: read and write** (Metadata: read-only
+  comes with it and is required)
+
+Nothing else — it never needs access to this repository. Then add it at
+<https://github.com/Onizuka893/lazymqtt/settings/secrets/actions> as
+`HOMEBREW_TAP_GITHUB_TOKEN`, spelled exactly that way.
+
+**A fine-grained token cannot be set to never expire** (366 days is the
+maximum). When it lapses the release still publishes and only the cask step
+fails — the same half-done state as having no token at all, except months
+later when nobody remembers this file. Put the expiry in a calendar, or accept
+a classic token with `repo` scope in exchange for not having to.
 
 If the secret is missing, the release still publishes and only the cask step
 fails — an annoying half-done state, so check it before the first tag:
