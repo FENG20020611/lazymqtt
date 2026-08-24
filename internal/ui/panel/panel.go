@@ -19,8 +19,8 @@ import (
 // copy of them.
 type Context struct {
 	Store  *store.Store
-	Theme  theme.Palette
-	Keys   keys.Map
+	Theme  *theme.Palette
+	Keys   *keys.Map
 	Config config.Config
 
 	// Paused freezes the view without touching the connection.
@@ -31,7 +31,7 @@ type Context struct {
 
 // Box draws a bordered panel with a title, sized to exactly w by h cells
 // including the border.
-func Box(t theme.Palette, focused bool, title, body string, w, h int) string {
+func Box(t *theme.Palette, focused bool, title, body string, w, h int) string {
 	if w < 4 || h < 3 {
 		// Degenerate terminal: render the body unadorned rather than panic.
 		return truncateBlock(body, max(w, 0), max(h, 0))

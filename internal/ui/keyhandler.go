@@ -5,6 +5,7 @@ import (
 
 	"github.com/Onizuka893/lazymqtt/internal/app"
 	"github.com/Onizuka893/lazymqtt/internal/mqtt"
+	"github.com/Onizuka893/lazymqtt/internal/state"
 	"github.com/Onizuka893/lazymqtt/internal/ui/panel"
 )
 
@@ -75,16 +76,20 @@ func (m Model) handleModeKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case k.String() == "ctrl+s" || (k.String() == "enter" && !m.publish.PayloadFocused()):
 			if err := m.publish.Validate(); err != nil {
-				m.publish = m.publish.SetError(err)
-				return m, nil
+				return m.setPublish(m.publish.SetError(err)), nil
 			}
 			req := m.publish.Request()
 			m.mode = ModeNormal
+			m.persisted = m.persisted.RememberPublish(state.Publish{
+				Topic:   req.Topic,
+				Payload: string(req.Payload),
+				QoS:     req.QoS,
+				Retain:  req.Retain,
+			})
 			return m, m.app.PublishCmd(req)
 		}
-		var cmd tea.Cmd
-		m.publish, cmd = m.publish.Update(k)
-		return m, cmd
+		pub, cmd := m.publish.Update(k)
+		return m.setPublish(pub), cmd
 
 	case ModePrompt:
 		switch {
@@ -93,8 +98,8 @@ func (m Model) handleModeKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case matchesAny(k, m.keys.Confirm):
 			return m.submitPrompt()
 		}
-		var cmd tea.Cmd
-		m.prompt, cmd = m.prompt.Update(k)
+		prompt, cmd := m.prompt.Update(k)
+		m = m.setPrompt(prompt)
 		if m.prompt.Live {
 			m = m.applyFilter(m.prompt.Value())
 		}
@@ -197,13 +202,12 @@ func (m Model) handleNormalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	case matchesAny(k, m.keys.Filter):
 		m.mode = ModePrompt
-		m.prompt = panel.NewPrompt(panel.PromptFilter, "filter:", m.filter, true)
-		return m, nil
+		return m.setPrompt(panel.NewPrompt(panel.PromptFilter, "filter:", m.filter, true)), nil
 
 	case matchesAny(k, m.keys.Subscribe):
 		m.mode = ModePrompt
-		m.prompt = panel.NewPrompt(panel.PromptSubscribe, "subscribe:", suggestFilter(m.topics.Selected()), false)
-		return m, nil
+		return m.setPrompt(panel.NewPrompt(
+			panel.PromptSubscribe, "subscribe:", suggestFilter(m.topics.Selected()), false)), nil
 
 	case matchesAny(k, m.keys.Unsubscribe):
 		return m.unsubscribeSelected()
@@ -211,8 +215,12 @@ func (m Model) handleNormalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case matchesAny(k, m.keys.Publish):
 		m.mode = ModePublish
 		_, h := panel.BoxInner(m.width*2/3, m.height/2)
-		m.publish = panel.NewPublish(m.topics.Selected(), m.width*2/3, max(h-8, 3))
-		return m, nil
+		topic := m.topics.Selected()
+		pub := panel.NewPublish(topic, m.width*2/3, max(h-8, 3))
+		if p, ok := m.persisted.RecentFor(topic); ok {
+			pub = pub.Seed(p.Payload, p.QoS, p.Retain)
+		}
+		return m.setPublish(pub), nil
 
 	case matchesAny(k, m.keys.Connect):
 		if m.brokers = panel.NewBrokers(m.cfg, m.app.Resolved().Name); m.brokers.Empty() {
@@ -371,8 +379,7 @@ func (m Model) submitPrompt() (tea.Model, tea.Cmd) {
 	case panel.PromptSubscribe:
 		if err := mqtt.ValidateFilter(value); err != nil {
 			// Inline, and no MQTT call is made.
-			m.prompt = m.prompt.SetError(err)
-			return m, nil
+			return m.setPrompt(m.prompt.SetError(err)), nil
 		}
 		m.mode = ModeNormal
 		m.subscriptions = upsertSub(m.subscriptions, mqtt.Subscription{Filter: value})

@@ -54,6 +54,19 @@ func NewPublish(topic string, w, h int) Publish {
 	return Publish{topic: ti, payload: ta, field: fieldTopic}
 }
 
+// Seed prefills the payload, QoS and retain flag, so re-publishing a topic
+// tested a minute ago does not mean retyping the payload.
+func (p Publish) Seed(payload string, qos byte, retain bool) Publish {
+	if payload != "" {
+		p.payload.SetValue(payload)
+	}
+	if qos <= 2 {
+		p.qos = qos
+	}
+	p.retain = retain
+	return p
+}
+
 // Update routes a key to the focused control, or handles field navigation.
 //
 // While this modal is open it owns the keyboard: `q` inside the payload

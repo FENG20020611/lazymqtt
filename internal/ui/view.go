@@ -100,7 +100,10 @@ func (m Model) panelFor(ctx panel.Context, f Focus, outerW, outerH int) (string,
 	w, h := panel.BoxInner(outerW, outerH)
 	switch f {
 	case FocusTopics:
-		title := sprintf("[1] Topics (%d)", nodeCount(m.store))
+		// The count is topics that have received a message, matching the
+		// header. Counting visible rows instead reads as a bug: collapsing a
+		// branch would appear to lose topics.
+		title := sprintf("[1] Topics (%d)", m.store.Stats().Topics)
 		return title, m.topics.View(ctx, w, h)
 	case FocusMessages:
 		topic := m.messages.Topic()

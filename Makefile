@@ -10,7 +10,14 @@ LDFLAGS := -s -w \
 
 BROKER ?= tcp://localhost:1883
 
-.PHONY: build run dev test test-int lint fmt vuln certs loadgen snapshot clean
+# Load generator defaults, overridable: make loadgen RATE=50000 TOPICS=2000
+RATE     ?= 10000
+TOPICS   ?= 500
+PAYLOAD  ?= 256
+DURATION ?= 60s
+PATTERN  ?= steady
+
+.PHONY: build run dev test test-int test-short bench golden lint fmt vuln certs loadgen snapshot clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/$(BINARY) ./cmd/$(BINARY)
@@ -25,10 +32,21 @@ dev:
 test:
 	go test -race ./...
 
+# Skips the minute-long memory ceiling test and the retained flood.
+test-short:
+	go test -short -race ./...
+
 test-int:
 	docker compose -f deploy/docker-compose.yml up -d
 	go test -tags=integration -race ./test/... ; status=$$? ; \
 	docker compose -f deploy/docker-compose.yml down ; exit $$status
+
+bench:
+	go test ./internal/ui ./internal/store -run XXX -bench . -benchmem
+
+# Regenerate the golden frames. Read the diff before committing it.
+golden:
+	go test ./internal/ui -update
 
 lint:
 	golangci-lint run
@@ -44,7 +62,8 @@ certs:
 	./deploy/certs/gen.sh
 
 loadgen:
-	go run ./cmd/mqttload --rate $(or $(RATE),10000)
+	go run ./cmd/mqttload --broker $(BROKER) --rate $(RATE) --topics $(TOPICS) \
+		--payload $(PAYLOAD) --duration $(DURATION) --pattern $(PATTERN)
 
 snapshot:
 	goreleaser release --snapshot --clean

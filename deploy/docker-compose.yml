@@ -6,6 +6,7 @@ services:
     ports:
       - "1883:1883"   # plain
       - "8883:8883"   # TLS (needs `make certs`)
+      - "8884:8884"   # mutual TLS (needs `make certs`)
       - "9001:9001"   # websockets
     volumes:
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro

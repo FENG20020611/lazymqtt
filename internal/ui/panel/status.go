@@ -110,7 +110,8 @@ func InsecureBanner(ctx Context, w int) string {
 }
 
 // Footer renders the key bar from the same bindings the dispatcher uses.
-func Footer(ctx Context, h help.Model, w int) string {
+func Footer(ctx Context, hp *help.Model, w int) string {
+	h := *hp
 	h.SetWidth(w)
 	return ctx.Theme.Footer.Render(Truncate(h.ShortHelpView(ctx.Keys.ShortHelp()), w))
 }

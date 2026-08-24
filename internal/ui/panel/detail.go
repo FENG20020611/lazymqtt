@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -90,32 +91,89 @@ func (p Detail) View(ctx Context, m *mqtt.Message, w, h int) string {
 	return strings.Join(append(head, body...), "\n")
 }
 
+// maxWrapBytes bounds the payload handed to the soft-wrapper.
+//
+// Wrapping has to see a whole logical line to decide where to break it, so
+// unlike the truncating path it cannot be windowed by line. 128 KiB of text
+// is far more than any terminal can display and takes well under a
+// millisecond to reflow, which keeps the wrap toggle instant on a payload of
+// any size.
+const maxWrapBytes = 128 << 10
+
 func (p Detail) payloadLines(ctx Context, m *mqtt.Message, w, h int) []string {
 	if p.Formatting {
 		return []string{ctx.Theme.Dim.Render("  formatting…")}
 	}
-	text := ""
+	raw := m.Payload
 	if p.Pretty != "" && p.PrettySeq == m.Seq {
-		text = p.Pretty
-	} else {
-		text = sanitize.Block(m.Payload)
+		raw = []byte(p.Pretty)
 	}
-	if text == "" {
+	if len(raw) == 0 {
 		return []string{ctx.Theme.Dim.Render("  (empty payload)")}
 	}
 
-	lines := strings.Split(text, "\n")
+	// Window the RAW bytes before sanitising them. Sanitising first and
+	// slicing afterwards is the obvious order and it is the wrong one: it
+	// decodes, validates and re-encodes every byte of the payload on every
+	// frame to display at most h lines of it. On a 10 MB payload that is
+	// seconds per frame, and the app appears to hang while scrolling.
+	var text string
 	if p.Wrap {
-		lines = strings.Split(lipgloss.Wrap(text, max(w, 1), " -"), "\n")
+		clipped := raw
+		if len(clipped) > maxWrapBytes {
+			clipped = clipped[:maxWrapBytes]
+		}
+		text = lipgloss.Wrap(sanitize.Block(clipped), max(w, 1), " -")
+	} else {
+		// Each line is truncated to w columns anyway, so there is no reason
+		// to carry more than a generous multiple of that. Four bytes per
+		// column covers the widest UTF-8 rune.
+		text = sanitize.Block(lineWindow(raw, p.offset, h, max(w, 1)*4+64))
 	}
 
-	// Render only the visible window; a 1 MiB payload is 30,000 lines and
-	// none but h of them can be seen.
-	from := min(p.offset, max(len(lines)-1, 0))
+	lines := strings.Split(text, "\n")
+	from := 0
+	if p.Wrap {
+		from = min(p.offset, max(len(lines)-1, 0))
+	}
 	to := min(from+h, len(lines))
 	out := make([]string, 0, to-from)
 	for _, l := range lines[from:to] {
 		out = append(out, ctx.Theme.Value.Render(Truncate(l, w)))
+	}
+	return out
+}
+
+// lineWindow returns the bytes of at most count newline-separated lines
+// starting at line `from`, clipping any single line to maxLine bytes.
+//
+// The scan is a plain memchr walk over the payload with no allocation beyond
+// the window itself, so the cost is proportional to what is displayed rather
+// than to the size of the message.
+func lineWindow(raw []byte, from, count, maxLine int) []byte {
+	if count < 1 {
+		count = 1
+	}
+	out := make([]byte, 0, count*min(maxLine, 4096))
+	line := 0
+	for len(raw) > 0 && line < from+count {
+		end := bytes.IndexByte(raw, '\n')
+		var cur []byte
+		if end < 0 {
+			cur, raw = raw, nil
+		} else {
+			cur, raw = raw[:end], raw[end+1:]
+		}
+		if line >= from {
+			if len(cur) > maxLine {
+				cur = cur[:maxLine]
+			}
+			if len(out) > 0 {
+				out = append(out, '\n')
+			}
+			out = append(out, cur...)
+		}
+		line++
 	}
 	return out
 }

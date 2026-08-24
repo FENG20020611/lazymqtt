@@ -17,6 +17,7 @@ import (
 	"github.com/Onizuka893/lazymqtt/internal/app"
 	"github.com/Onizuka893/lazymqtt/internal/config"
 	"github.com/Onizuka893/lazymqtt/internal/logging"
+	"github.com/Onizuka893/lazymqtt/internal/state"
 	"github.com/Onizuka893/lazymqtt/internal/ui"
 	"github.com/Onizuka893/lazymqtt/internal/version"
 )
@@ -151,12 +152,21 @@ func runTUI(a *app.App, cfg config.Config, g globalFlags) (code int) {
 	prompt := newCachedPrompt()
 	warmPrompt(cfg, g.broker, prompt)
 
+	// A bad state file must never stop the app: it holds preferences, not
+	// configuration. Log the reason and start fresh.
+	statePath := state.Path()
+	saved, err := state.Load(statePath)
+	if err != nil {
+		a.Logger.Warn("ignoring the state file", "path", statePath, "err", err)
+	}
+
 	model := ui.New(ui.Options{
 		App:          a,
 		Config:       cfg,
 		InitialTopic: g.topics,
 		AutoBroker:   g.broker,
 		Prompt:       prompt.Func(),
+		State:        saved,
 	})
 
 	prompt.Seal()
@@ -174,9 +184,19 @@ func runTUI(a *app.App, cfg config.Config, g globalFlags) (code int) {
 		}
 	}()
 
-	if _, err := p.Run(); err != nil && !errors.Is(err, tea.ErrProgramKilled) {
+	final, err := p.Run()
+	if err != nil && !errors.Is(err, tea.ErrProgramKilled) {
 		fmt.Fprintln(os.Stderr, "lazymqtt:", err)
 		return 1
+	}
+
+	// Persist after the program has stopped rather than from a tea.Cmd racing
+	// tea.Quit: the store may only be read from this goroutine, and here it
+	// is the only one left.
+	if fm, ok := final.(ui.Model); ok {
+		if err := state.Save(statePath, fm.StateSnapshot()); err != nil {
+			a.Logger.Warn("could not write the state file", "path", statePath, "err", err)
+		}
 	}
 	return 0
 }

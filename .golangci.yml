@@ -23,6 +23,7 @@ linters:
             - "**/internal/mqtt/**"
             - "**/internal/store/**"
             - "**/internal/config/**"
+            - "**/internal/state/**"
           deny:
             - pkg: charm.land
               desc: the domain layer must not import the TUI toolkit

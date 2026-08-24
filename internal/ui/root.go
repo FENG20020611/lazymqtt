@@ -11,6 +11,7 @@ import (
 	"github.com/Onizuka893/lazymqtt/internal/app"
 	"github.com/Onizuka893/lazymqtt/internal/config"
 	"github.com/Onizuka893/lazymqtt/internal/mqtt"
+	"github.com/Onizuka893/lazymqtt/internal/state"
 	"github.com/Onizuka893/lazymqtt/internal/store"
 	"github.com/Onizuka893/lazymqtt/internal/ui/keys"
 	"github.com/Onizuka893/lazymqtt/internal/ui/panel"
@@ -81,9 +82,12 @@ type Model struct {
 	app   *app.App
 	store *store.Store
 	cfg   config.Config
-	keys  keys.Map
-	help  help.Model
-	theme theme.Palette
+	help  *help.Model
+	theme *theme.Palette
+
+	// keys is a pointer for the same reason as prompt and publish below: the
+	// binding table is 2.6 KB of help strings that never change after New.
+	keys *keys.Map
 
 	width, height int
 	layout        Layout
@@ -96,9 +100,19 @@ type Model struct {
 	detail   panel.Detail
 	subs     panel.Subscriptions
 	logs     panel.Logs
-	prompt   panel.Prompt
-	publish  panel.Publish
 	brokers  panel.Brokers
+
+	// prompt and publish are behind pointers because they embed bubbles'
+	// textinput and textarea, which are 8 KB and 23 KB respectively. This
+	// struct is copied on every Update and boxed into a tea.Model on the way
+	// out, so an embedded textarea costs 46 KB of garbage per keystroke —
+	// §21 pitfall 15, and modelsize_test.go is the guard against it
+	// reappearing. Both are non-nil for the life of the model.
+	//
+	// The rule of thumb: read-only for the model's lifetime, or bigger than a
+	// few hundred bytes, means a pointer.
+	prompt  *panel.Prompt
+	publish *panel.Publish
 
 	status        mqtt.ConnStatus
 	subscriptions []mqtt.Subscription
@@ -122,6 +136,11 @@ type Model struct {
 	autoTopics []string
 	autoBroker string
 	promptFn   config.PromptFunc
+
+	// persisted carries the previous session's preferences forward and
+	// accumulates this session's. It is written out once, after the program
+	// has exited and the terminal has been restored.
+	persisted state.State
 }
 
 // Options configure the root model.
@@ -132,12 +151,18 @@ type Options struct {
 	// AutoBroker is connected to at startup, if set.
 	AutoBroker string
 	Prompt     config.PromptFunc
+	// State is the previous session's persisted preferences. The zero value
+	// is a first run.
+	State state.State
 }
 
 // New builds the root model.
 func New(opts Options) Model {
 	h := help.New()
 	h.Styles = help.DefaultDarkStyles()
+	// help.Model carries its own style set, another 4.6 KB that would
+	// otherwise be copied on every Update.
+	helpModel := &h
 
 	startFocus := FocusTopics
 	switch opts.Config.UI.StartPanel {
@@ -149,25 +174,50 @@ func New(opts Options) Model {
 		startFocus = FocusSubs
 	}
 
-	return Model{
+	// An explicit --broker always wins; the remembered profile is only a
+	// convenience for starting with no arguments at all.
+	autoBroker := opts.AutoBroker
+	if autoBroker == "" && opts.State.LastBroker != "" {
+		if _, ok := opts.Config.Brokers[opts.State.LastBroker]; ok {
+			autoBroker = opts.State.LastBroker
+		}
+	}
+
+	km := keys.Default()
+
+	m := Model{
 		app:        opts.App,
 		store:      store.New(opts.Config.Limits.Store()),
 		cfg:        opts.Config,
-		keys:       keys.Default(),
-		help:       h,
+		keys:       &km,
+		help:       helpModel,
 		theme:      theme.Default,
 		focus:      startFocus,
 		messages:   panel.NewMessages(),
 		logs:       panel.NewLogs(),
+		prompt:     &panel.Prompt{},
+		publish:    &panel.Publish{},
 		now:        time.Now(),
 		autoTopics: opts.InitialTopic,
-		autoBroker: opts.AutoBroker,
+		autoBroker: autoBroker,
 		promptFn:   opts.Prompt,
+		persisted:  opts.State,
 		// A sensible default height so the first frame before WindowSizeMsg
 		// is not degenerate.
 		width:  80,
 		height: 24,
 	}
+	m.store.RestoreExpanded(opts.State.Expanded)
+	return m
+}
+
+// StateSnapshot captures what should survive this session. It reads the store,
+// so it runs on the Bubble Tea goroutine or after the program has stopped —
+// never from a tea.Cmd.
+func (m Model) StateSnapshot() state.State {
+	s := m.persisted
+	s.Expanded = m.store.ExpandedPaths(state.MaxExpandedNodes)
+	return s.Sanitize()
 }
 
 // Store exposes the store for tests.
@@ -196,6 +246,18 @@ func (m Model) Init() tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+// setPrompt and setPublish keep the panels' value semantics at the call sites
+// while the model holds them behind a pointer.
+func (m Model) setPrompt(p panel.Prompt) Model {
+	m.prompt = &p
+	return m
+}
+
+func (m Model) setPublish(p panel.Publish) Model {
+	m.publish = &p
+	return m
 }
 
 func (m Model) context() panel.Context {

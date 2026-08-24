@@ -1,0 +1,24 @@
+                                                                                
+                                                                                
+  ╭──────────────────────────────────────────────────────────────────────────╮  
+  │Help                                                                      │  
+  │lazymqtt — keys                                                           │  
+  │                                                                          │  
+  │?      help             ↑/k    up                c brokers     …          │  
+  │⇥      next panel       ↓/j    down              r reconnect              │  
+  │⇧⇥     prev panel       h      collapse          s subscribe              │  
+  │1      topics           l      expand            u unsubscribe            │  
+  │2      messages         g      top               p publish                │  
+  │3      detail           G      bottom            / filter                 │  
+  │4      subscriptions    ctrl+u half page up      n next match             │  
+  │ctrl+l logs             ctrl+d half page down    N prev match             │  
+  │esc    back             ↵      select                                     │  
+  │q      quit                                                               │  
+  │ctrl+c force quit                                                         │  
+  │                                                                          │  
+  │lazymqtt dev (commit none, built unknown)                                 │  
+  │? or esc to close                                                         │  
+  │                                                                          │  
+  ╰──────────────────────────────────────────────────────────────────────────╯  
+                                                                                
+                                                                                

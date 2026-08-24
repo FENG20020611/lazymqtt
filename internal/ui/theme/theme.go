@@ -51,7 +51,13 @@ var (
 )
 
 // Default is the single palette instance the UI renders through.
-var Default = build()
+//
+// It is handed around as a pointer. A Palette is roughly 19 KB of
+// lipgloss.Style values, and the root model is copied on every Update and
+// carried into a panel.Context on every render — passing it by value costs
+// tens of kilobytes of copying per keystroke for a set of styles that never
+// changes (§21, pitfall 15).
+var Default = func() *Palette { p := build(); return &p }()
 
 func build() Palette {
 	base := lipgloss.NewStyle().Foreground(colFg)

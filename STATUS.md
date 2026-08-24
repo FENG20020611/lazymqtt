@@ -4,17 +4,27 @@ Working notes for picking this up in a fresh session. The design of record is
 [`lazymqtt_plan.md`](lazymqtt_plan.md); section references below (§n) point at it.
 
 **Last updated:** 2026-08-24
-**State:** Phases 0–8 implemented and green. Phase 9 (hardening) and Phase 10
-(release) not started. Module path `github.com/Onizuka893/lazymqtt`, Go 1.27.
+**State:** Phases 0–9 implemented and green. Phase 10 (release) not started.
+Module path `github.com/Onizuka893/lazymqtt`, Go 1.27.
 
 ```
-go build ./...      # clean
-go vet ./...        # clean
-go test -race ./... # all packages pass
-gofmt -l ./cmd ./internal   # empty
+go build ./...                    # clean
+go vet ./...                      # clean
+go vet -tags=integration ./test/… # clean
+go test -race ./...               # all packages pass
+gofmt -l ./cmd ./internal ./test  # empty
 ```
 
-~7,500 lines of source, ~1,700 lines of tests, 55 Go files.
+~8,700 lines of source, ~4,700 lines of tests, 81 Go files.
+
+`golangci-lint` is **not installed locally**, so `make lint` has not been run
+since the Phase 9 files were added. CI runs it on every push; expect it to have
+opinions about the new test files.
+
+**Still not verified against a real broker.** Docker was not running in any
+session so far, so the compose stack has never started and the integration
+suite has never actually executed — it compiles and skips. This remains the
+highest-value next step; see "What is left".
 
 ---
 
@@ -38,19 +48,29 @@ review:
   disconnects a client that appears to be doing nothing wrong.
 
 A `depguard` rule in `.golangci.yml` enforces the layering (`ui → app →
-{store, mqtt, config}`); the domain packages cannot import `charm.land/*`.
+{store, mqtt, config, state}`); the domain packages cannot import
+`charm.land/*`.
+
+A third invariant, added in Phase 9 and guarded by a test:
+
+- **The root `ui.Model` stays under 2 KB.** It is copied on every `Update` and
+  boxed into a `tea.Model` on the way out, so a fat embedded component costs
+  that much garbage per keystroke. `internal/ui/modelsize_test.go` fails if it
+  grows.
+
+Every rule above is now written down in `CONTRIBUTING.md` as well, so it is
+reviewable rather than folklore.
 
 ---
 
 ## What is done
 
-### Phase 0 — toolchain (partial)
+### Phase 0 — toolchain ✅
 `go.mod`, directory skeleton, `Makefile`, `.golangci.yml` (with the depguard
 layering rule), `.gitignore`, `internal/version` with ldflags injection and a
-`debug.ReadBuildInfo` fallback for the `go install …@latest` path.
-
-**Missing:** `.github/workflows/{ci,release}.yml`, `LICENSE`, `README.md`,
-a test for `version`.
+`debug.ReadBuildInfo` fallback for the `go install …@latest` path plus tests,
+`.github/workflows/{ci,release}.yml`, `.goreleaser.yaml`, `LICENSE`,
+`README.md`, `CONTRIBUTING.md`.
 
 ### Phase 1 — domain core ✅
 - `internal/mqtt`: `Message`, `Properties`, `Subscription`, `Options`,
@@ -92,7 +112,11 @@ above the port.
 daemon was not running, so the compose stack has never been started. The only
 live exercise so far is a connection-refused path (correctly classified as
 retryable). **This is the highest-value next step** — start Docker Desktop and
-run `make dev`.
+run `make dev`, then `make test-int`.
+
+The integration suite that will verify it now exists (Phase 9 below) and is
+written to skip, not fail, when no broker answers — so a green
+`go test ./...` today says nothing about the adapter against a real broker.
 
 ### Phase 4 — bridge and coalescer ✅
 Drain loops, ticker flush, batch cap, drop propagation, context shutdown,
@@ -128,11 +152,65 @@ switch — the plan's rule is to adopt Cobra only past four real subcommands or
 when shell completions are wanted; that rule belongs in `CONTRIBUTING.md`,
 which does not exist yet.
 
+### Phase 9 — hardening ✅
+- **`internal/state`** (§9.4): `state.json` under `$XDG_STATE_HOME` with an
+  atomic temp-file-and-rename write at mode 0600, holding the last broker
+  *profile name*, the expanded-node set and recent publish payloads. A missing
+  file is a first run; a corrupt or foreign-version file is logged and
+  ignored. Nothing in the schema can hold a credential, and a test asserts on
+  the written bytes. `config.yaml` is still never rewritten.
+  - Expansion is restored lazily: at startup the tree is empty, so
+    `Store.RestoreExpanded` records the wanted paths and `ensureNode` applies
+    them as nodes appear.
+  - Persistence happens in `main.go` after `p.Run()` returns, from the final
+    model — not from a `tea.Cmd` racing `tea.Quit`, which would read the store
+    off the update goroutine.
+  - The remembered broker is a convenience for a bare `lazymqtt`; `--broker`
+    always wins, and a profile since deleted from `config.yaml` is ignored.
+- **`cmd/mqttload`** (§15.2): rate, topic cardinality, payload size, QoS,
+  duration and `--pattern steady|sawtooth|retained`. Rate control is a 10 ms
+  tick with a fractional carry, because a ticker per message at 10,000 msg/s
+  spends more time waking up than publishing — and truncating the per-tick
+  quota silently delivers a third of the requested rate. Excluded from release
+  builds (`.goreleaser.yaml` builds only `./cmd/lazymqtt`).
+- **`test/integration/`**, `//go:build integration`: round trip, retained
+  delivery to a client that was not connected, QoS 1 and 2, ingest truncation,
+  granted-QoS reporting, the §12.1 broker-restart test that asserts *messages
+  flow again*, a 20,000-message retained flood against `max_topics` with a
+  heap ceiling, TLS, mTLS, an untrusted certificate, and the auth-rejection
+  paths against the broker on 1884. All skip cleanly with no broker.
+- **Golden-file `View()` tests**: ten frames in `internal/ui/testdata`, ANSI
+  stripped so they do not depend on `TERM` (§21 pitfall 19), with
+  `TestFramesAreStyled` separately asserting styling is still emitted and
+  `TestRenderIsDeterministic` guarding against map-order and clock leakage.
+  `make golden` regenerates.
+- **Chaos tests**: payloads full of ESC/OSC/C1 sequences and invalid UTF-8,
+  10 MB payloads, a 1 MB single-line payload, wide and emoji topics, 200-level
+  deep topics, empty topic segments, and sustained ingest under a filter on a
+  40×12 terminal. Every frame is checked to fit the window by *display* width.
+- **Perf pass** (§19): benchmarks for ingest, render, filtered render and
+  keypress, plus a heap-ceiling test driving a minute at 5,000 msg/s over 500
+  topics, and an unbounded-cardinality test. Two real regressions found and
+  fixed — see "Fixed in the hardening pass".
+- **`goleak`** now guards `internal/ui` and `internal/mqtt/paho5` as well as
+  `internal/app`, with paho5 gaining explicit tests for closing an adapter
+  that never connected and for repeated failed connect cycles (§21 pitfall
+  12).
+- **Tests for the two untested packages**: `internal/version` (including that
+  `Resolve` never overwrites linker-injected values) and `internal/logging`
+  (nothing reaches stderr, JSON to the configured file only at mode 0600, ring
+  eviction, concurrent writers under `-race`, derived handlers sharing the
+  ring).
+- **`CONTRIBUTING.md`** records the Cobra rule, the layering rules, the
+  single-writer and non-blocking-callback invariants, the model-size rule, the
+  golden-file workflow and the perf targets.
+
 ### Dev environment ⚠️
-`deploy/docker-compose.yml` (mosquitto with plain/TLS/websocket listeners, a
-second password-protected broker on 1884 whose password file is generated at
-startup so no hash is committed, and a seed container publishing a realistic
-retained tree), mosquitto configs, and `deploy/certs/gen.sh`. **Never run.**
+`deploy/docker-compose.yml` (mosquitto with plain/TLS/**mTLS**/websocket
+listeners, a second password-protected broker on 1884 whose password file is
+generated at startup so no hash is committed, and a seed container publishing a
+realistic retained tree), mosquitto configs, and `deploy/certs/gen.sh`.
+**Never run.**
 
 ---
 
@@ -158,35 +236,49 @@ retained-message floods. Auth-rejection classification is now unit-tested, but
 confirm end to end against `mosquitto-auth` on port 1884 (`lazymqtt / secret`)
 that a wrong password lands in `failed` and stops rather than retrying.
 
-### 2. Integration tests (`test/integration/`, `//go:build integration`)
-The directory does not exist. Per §14.2: round trip, retained delivery on
-subscribe, QoS 1 and 2, the reconnect test above, a 20,000-message retained
-flood asserting `max_topics` is respected without deadlock, TLS and mTLS.
-`make test-int` is already wired to run them.
+Run `make test-int`, which brings the stack up, runs the suite and tears it
+down. Then run the tests that need certificates:
 
-### 3. `cmd/mqttload` (§15.2)
-Not written. The load generator is what validates the coalescer and the memory
-ceiling for real: `--rate`, `--topics`, `--payload`, `--qos`, `--duration`, and
-`--pattern sawtooth|retained`. Excluded from release builds.
+```
+make certs
+docker compose -f deploy/docker-compose.yml up -d
+go test -tags=integration -race -run 'TLS' ./test/...
+```
 
-### 4. Phase 9 — hardening
-- Golden-file `View()` tests with `tea.WithColorProfile(colorprofile.Ascii)`
-  and `tea.WithWindowSize` — without forcing the profile they break between CI
-  and a developer's terminal (§21 pitfall 19).
-- The state file at `~/.local/state/lazymqtt/state.json` (§9.4): last broker,
-  expanded nodes, recent publish payloads. **Never rewrite `config.yaml`.**
-- A `pprof` pass under load; the §19 success test is 500 topics at 5,000 msg/s
-  for an hour under 100 MB RSS with imperceptible input latency.
-- Soak and chaos tests: broker restart loop, 10 MB payloads, payloads full of
-  ANSI escapes, wide/emoji topics.
-- `goleak` across more of the suite (currently only `internal/app`).
-- `README.md` with a VHS or asciinema recording, `CONTRIBUTING.md` recording
-  the Cobra rule and the layering rules, `LICENSE` (MIT or Apache-2.0 — both
-  are compatible with paho's EPL-2.0/EDL-1.0).
+Expect the mTLS test to be the one that surprises you: the `require_certificate
+true` listener on 8884 is new in this pass and has never accepted a connection.
 
-### 5. Phase 10 — release
-`.goreleaser.yaml`, the two GitHub workflows, a Homebrew tap, a documented
-config reference, `v0.1.0`.
+### 2. A real soak run
+The heap ceiling is asserted over one simulated minute in
+`internal/ui/bench_test.go`, which is enough to prove the caps bound growth but
+not enough to catch slow accumulation. The §19 criterion is an hour:
+
+```
+docker compose -f deploy/docker-compose.yml up -d
+go run ./cmd/mqttload --rate 5000 --topics 500 --duration 1h &
+./bin/lazymqtt -b tcp://localhost:1883 -t '#'
+```
+
+Watch RSS and the goroutine count. Also worth doing under `--pattern sawtooth`,
+and with a broker restart loop running alongside.
+
+### 3. A `pprof` pass against the render path
+`BenchmarkRenderFrame` is ~1 ms per frame with ~9,700 allocations against a
+50 ms budget, so this is not urgent — but nearly all of those allocations are
+per-row `lipgloss.Style.Render` calls, and `Store.Dirty()`/`ClearDirty()`
+already exist and are wired for the §7.4 "skip rebuilding an unchanged panel"
+optimisation that no panel consults yet. That is the fix if it ever matters.
+
+### 4. Phase 10 — release
+A Homebrew tap, a documented config reference, and `v0.1.0`.
+`.goreleaser.yaml` and both workflows are already in place and the release
+pipeline is dry-run on every push, so what is left is mostly the tag and the
+tap.
+
+### 5. Documentation polish
+A VHS or asciinema recording for the README. The golden frames in
+`internal/ui/testdata` are a reasonable stand-in for what the app looks like in
+the meantime.
 
 ### 6. Deferred by design
 The MQTT 3.1.1 adapter (`internal/mqtt/paho3`) with `protocol: auto`
@@ -243,6 +335,43 @@ the 3.1.1 adapter to slot into.
   subscribe as deferred — the desired set is already recorded and
   `OnConnectionUp` re-issues it.
 
+## Fixed in the hardening pass
+
+All four were found by tests written in this phase, not by using the app.
+
+- **The root model was 58 KB and copied on every keystroke.** `ui.Model`
+  embedded `panel.Publish` and `panel.Prompt` by value, which embed
+  `textarea.Model` and `textinput.Model` — roughly 25 KB each of history rings
+  and styles. Bubble Tea copies the model on every `Update` and boxes it into
+  the `tea.Model` interface on return, so idle keystrokes were allocating
+  58 KB each. Those two, plus `help.Model`, `theme.Palette` and `keys.Map`
+  (2.6 KB of binding help strings, and the largest remaining field once the
+  text inputs were out), are now pointers. The model is **1128 bytes** and
+  `BenchmarkKeypress` went from ~11 µs and 6 allocs to 687 ns and 2.
+  `modelsize_test.go` holds the ceiling at 2 KB. `panel.Context` carried the
+  same binding table by value into every panel on every frame; it is a pointer
+  there too.
+- **Rendering a large payload was O(payload), not O(viewport).** The detail
+  pane sanitised and split the *entire* payload, then took the visible slice —
+  so a 10 MB message cost 3.3 s per frame and froze the UI on a single
+  keystroke. `payloadLines` now windows the raw bytes to the visible rows
+  first (`lineWindow`), and only sanitises and wraps that. Same frame, ~1 ms.
+  A test asserts the cost of a 4 MB payload stays within 3× that of a 4 KB one
+  rather than asserting a wall-clock bound, which would be flaky on CI.
+- **Selecting a branch node showed an empty message list.** §7.3 says a
+  structural node falls back to the firehose, but `selectedTopic` returned the
+  branch's path, which matched no messages — so `devices` read `Messages
+  devices (0) / no messages`, implying the tree was lying about its children.
+  It now returns `""` for a node with no message, which is the firehose. This
+  is the redundant-branches note from the previous "rough edges" list; the
+  branches were not equivalent after all.
+- **The Topics panel count contradicted the header.** The title counted
+  *visible flattened rows*, so collapsing a branch appeared to lose topics
+  while the header still said `topics 6`. It now shows `Stats().Topics`.
+
+Both perf fixes were invisible in normal use and would have shown up as "the
+app feels sluggish" long after the cause was forgettable.
+
 ## Known rough edges
 
 - `Options.Protocol` is parsed and carried but nothing acts on it: the v5
@@ -267,8 +396,14 @@ the 3.1.1 adapter to slot into.
   prompt is sealed once the program starts. Profiles reached that way need
   `password_cmd` or `password_env`. An in-TUI masked prompt is the proper fix;
   `panel.PromptPassword` already exists as the hook for it.
-- `internal/ui/update.go:selectedTopic` has redundant branches that all return
-  the same value; harmless, but it should be simplified.
+- **The state file remembers a broker but not a subscription.** Restart and
+  you reconnect to the same profile with an empty tree until you subscribe
+  again. Persisting the subscription set is a one-field change to
+  `state.State`, deliberately left out because auto-subscribing to `#` on
+  launch is a surprising amount of traffic to invite without being asked.
+- `internal/ui/testdata` holds ANSI-stripped frames, so the golden tests would
+  not catch a change that only affects colour. `TestFramesAreStyled` asserts
+  styling is emitted at all, which is a weaker guarantee than it sounds.
 
 ## Deviations from the plan
 

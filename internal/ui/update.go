@@ -39,6 +39,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, app.Toast(app.LevelError, "connect failed: %v", msg.Err)
 		}
 		m.insecure = m.app.Resolved().Insecure
+		// Only a named profile is remembered. A bare URL may carry a host
+		// the user typed once and would not expect to reconnect to.
+		if name := m.app.Resolved().Name; name != "" {
+			if _, ok := m.cfg.Brokers[name]; ok {
+				m.persisted.LastBroker = name
+			}
+		}
 		return m, nil
 
 	case app.SubResultMsg:
@@ -226,15 +233,10 @@ func (m Model) selectedTopic() string {
 	if n := m.store.Node(sel); n != nil && n.IsTopic() {
 		return sel
 	}
-	// A structural node has no messages of its own; show the firehose rather
-	// than an empty pane.
-	if sel == "" {
-		return ""
-	}
-	if n := m.store.Node(sel); n != nil && !n.IsTopic() {
-		return sel
-	}
-	return sel
+	// A structural node — `home`, `devices` — has no messages of its own.
+	// Naming it anyway leaves the message list permanently empty while the
+	// cursor sits on a branch, so fall back to the firehose instead.
+	return ""
 }
 
 func upsertSub(subs []mqtt.Subscription, s mqtt.Subscription) []mqtt.Subscription {

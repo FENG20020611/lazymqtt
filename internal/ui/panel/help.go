@@ -12,7 +12,10 @@ import (
 //
 // It is generated from the same key.Binding registry the dispatcher matches
 // on, so it cannot drift out of date.
-func Help(ctx Context, h help.Model, w int) string {
+func Help(ctx Context, hp *help.Model, w int) string {
+	// A local copy: the width and ShowAll set here are for this overlay only
+	// and must not follow the model back to the footer's short help.
+	h := *hp
 	h.SetWidth(max(w-4, 20))
 	h.ShowAll = true
 

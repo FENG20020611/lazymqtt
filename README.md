@@ -140,16 +140,26 @@ lazymqtt --headless -b prod -t '#'   # stream to stdout, no TUI
 Reach for `--headless` first when something is wrong: if messages stream
 there, the connection is fine and the problem is in the UI.
 
+## Files it writes
+
+| Path | Contents |
+|---|---|
+| `$XDG_CONFIG_HOME/lazymqtt/config.yaml` | Your configuration. lazymqtt **only ever reads** this, so your comments and formatting are safe. |
+| `$XDG_STATE_HOME/lazymqtt/state.json` | Last broker profile, which tree nodes were open, recent publish payloads. Written on exit, mode 0600, safe to delete. Never contains credentials. |
+
 ## Building
 
 ```sh
-make build     # CGO_ENABLED=0, -trimpath, version ldflags
-make test      # go test -race ./...
-make lint      # golangci-lint + gofumpt
-make test-int  # integration tests against a real broker
+make build       # CGO_ENABLED=0, -trimpath, version ldflags
+make test        # go test -race ./...
+make test-short  # the same, minus the slow memory-ceiling tests
+make lint        # golangci-lint + gofumpt
+make test-int    # integration tests against a real broker
+make bench       # ingest, render and keypress benchmarks
 ```
 
-Requires Go 1.24+.
+Requires Go 1.24+. See [CONTRIBUTING.md](CONTRIBUTING.md) for the layering
+rules and the decisions worth knowing before changing anything.
 
 ## Security notes
 

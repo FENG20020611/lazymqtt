@@ -26,6 +26,11 @@ type Store struct {
 	stats  Stats
 	filter Filter
 
+	// restore holds topics that were expanded in a previous session. Nodes
+	// are created as messages arrive, so the expansion cannot be applied up
+	// front; it is consulted once, when the node first appears.
+	restore map[string]struct{}
+
 	flat      []*TopicNode
 	flatDirty bool
 	treeDirty bool // set on any change the UI might need to redraw for
@@ -151,10 +156,54 @@ func (s *Store) ensureNode(topic string) *TopicNode {
 		c, created := n.child(seg)
 		if created {
 			s.treeDirty = true
+			if _, want := s.restore[c.Full]; want {
+				c.Expanded = true
+			}
 		}
 		n = c
 	}
 	return n
+}
+
+// RestoreExpanded records the topics that should open as soon as they appear.
+// Call it once at startup, before any ingest.
+func (s *Store) RestoreExpanded(topics []string) {
+	if len(topics) == 0 {
+		s.restore = nil
+		return
+	}
+	s.restore = make(map[string]struct{}, len(topics))
+	for _, t := range topics {
+		s.restore[t] = struct{}{}
+	}
+	// Anything already in the tree is opened now; the rest is handled as the
+	// nodes are created.
+	for t := range s.restore {
+		if n := s.Node(t); n != nil {
+			n.Expanded = true
+		}
+	}
+	s.Invalidate()
+}
+
+// ExpandedPaths returns the topics of every open node with children, in tree
+// order. This is what gets persisted so a restart returns to the same view.
+func (s *Store) ExpandedPaths(limit int) []string {
+	out := make([]string, 0, 64)
+	var walk func(*TopicNode)
+	walk = func(n *TopicNode) {
+		for _, c := range n.ordered {
+			if len(out) >= limit {
+				return
+			}
+			if c.Expanded && c.HasChildren() {
+				out = append(out, c.Full)
+			}
+			walk(c)
+		}
+	}
+	walk(s.root)
+	return out
 }
 
 // Node returns the node for a topic, or nil.
