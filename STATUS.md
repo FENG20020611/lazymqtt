@@ -275,10 +275,10 @@ already exist and are wired for the §7.4 "skip rebuilding an unchanged panel"
 optimisation that no panel consults yet. That is the fix if it ever matters.
 
 ### 4. Phase 10 — release
-A Homebrew tap, a documented config reference, and `v0.1.0`.
-`.goreleaser.yaml` and both workflows are already in place and the release
-pipeline is dry-run on every push, so what is left is mostly the tag and the
-tap.
+A Homebrew tap and `v0.1.0`. `.goreleaser.yaml` and both workflows are already
+in place and the release pipeline is dry-run on every push, and
+`docs/configuration.md` is the documented config reference, so what is left is
+mostly the tag and the tap.
 
 ### 5. Documentation polish
 A VHS or asciinema recording for the README. The golden frames in
@@ -417,8 +417,19 @@ mosquitto actually does is still an assumption.
 
 ## Known rough edges
 
-- `Options.Protocol` is parsed and carried but nothing acts on it: the v5
-  adapter is always selected. `app.DefaultClientFactory` is the switch point.
+- **Four config keys parse and validate but do nothing.** Writing the reference
+  in `docs/configuration.md` was what surfaced them, and they are listed there
+  under "accepted but not yet implemented" rather than quietly documented as
+  working:
+  - `defaults.protocol` / `brokers.*.protocol` reach `Options.Protocol` and
+    stop; the v5 adapter is always selected. `app.DefaultClientFactory` is the
+    switch point.
+  - `ui.theme` is validated against `auto|dark|light` and then never read; the
+    dark palette is always used.
+  - `ui.mouse` is never read.
+  - `logging.redact_payloads` is vacuous — no log call at any level includes a
+    payload, so there is nothing to redact. It is a latent trap: the first
+    person to log a payload will not know they were supposed to check it.
 - Dedupe across overlapping subscriptions is implemented for MQTT 5 only, and
   **it depends on the broker supporting subscription identifiers**. A broker
   that advertises `SubIDAvailable: false` in its CONNACK gets no identifiers

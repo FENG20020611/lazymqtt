@@ -93,6 +93,14 @@ or larger than a few hundred bytes goes behind a pointer — that is why `keys`,
 `theme`, `help`, `prompt` and `publish` all are. `modelsize_test.go` fails if
 the struct grows past 2 KB. (§21 pitfall 15)
 
+**A new config key means three edits, not one.** The field and its default in
+`internal/config`, a row in `docs/configuration.md`, and — if it has a default
+worth relying on — an assertion in `internal/config/reference_test.go`, which
+exists so the reference cannot drift from the code without a test failing. A
+key that parses and does nothing belongs in the reference's "accepted but not
+yet implemented" table; there are four of those today and each one cost someone
+an afternoon.
+
 **Sanitise at the render boundary, not at ingest.** Payloads are
 attacker-controllable bytes going into a terminal, so everything displayed
 passes through `internal/ui/sanitize`. The store keeps the raw bytes, because
@@ -108,6 +116,11 @@ on the SUBSCRIBE packet, not per filter (§3.8.2.1.2), so batching filters gives
 them all the same identifier and `paho5/dedupe.go` can no longer tell which
 subscription a delivery came from. Batching would save round trips only on the
 reconnect replay, and correctness beats that.
+
+**Never log a payload without checking `logging.redact_payloads`.** Nothing
+logs payloads today, so the setting is currently vacuous — which makes it a
+trap, because the config documents it as on by default. A payload is
+attacker-controlled data and a log file outlives the session that wrote it.
 
 **Never dedupe messages by comparing payloads.** Two identical messages
 published twice are two messages. Suppressing the second one makes the viewer

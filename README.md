@@ -60,7 +60,11 @@ lazymqtt config check    # validates it and prints the resolved brokers
 ```
 
 The file lives at `$XDG_CONFIG_HOME/lazymqtt/config.yaml`, or
-`~/.config/lazymqtt/config.yaml`. A minimal profile:
+`~/.config/lazymqtt/config.yaml`. Every key, default and validation rule is in
+the [configuration reference](docs/configuration.md); what follows is the part
+you actually need.
+
+A minimal profile:
 
 ```yaml
 version: 1

@@ -151,7 +151,9 @@ func ExpandPath(p string) string {
 
 // StarterConfig is the commented file written by `lazymqtt config init`.
 const StarterConfig = `# lazymqtt configuration
-# Reference: https://github.com/Onizuka893/lazymqtt#configuration
+# Full reference: https://github.com/Onizuka893/lazymqtt/blob/main/docs/configuration.md
+#
+# lazymqtt only ever reads this file, so your comments and formatting are safe.
 version: 1
 
 defaults:
