@@ -162,7 +162,7 @@ make test-int    # integration tests against a real broker
 make bench       # ingest, render and keypress benchmarks
 ```
 
-Requires Go 1.24+. See [CONTRIBUTING.md](CONTRIBUTING.md) for the layering
+Requires Go 1.25+. See [CONTRIBUTING.md](CONTRIBUTING.md) for the layering
 rules and the decisions worth knowing before changing anything.
 
 ## Security notes

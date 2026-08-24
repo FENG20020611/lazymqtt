@@ -5,7 +5,12 @@ Working notes for picking this up in a fresh session. The design of record is
 
 **Last updated:** 2026-08-24
 **State:** Phases 0–9 implemented and green. Phase 10 (release) not started.
-Module path `github.com/Onizuka893/lazymqtt`, Go 1.27.
+Module path `github.com/Onizuka893/lazymqtt`, `go 1.25.0` in `go.mod`.
+
+The `go` directive is the **minimum**, not the toolchain in use. It was 1.27
+purely because that is what the machine had installed, which broke the
+`oldstable` CI matrix entry — 1.25 is the real floor (a dependency needs it;
+1.24 fails `go mod tidy`), and 1.25 is what the matrix now proves.
 
 ```
 go build ./...                    # clean

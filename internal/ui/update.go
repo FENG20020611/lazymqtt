@@ -8,7 +8,6 @@ import (
 
 	"github.com/Onizuka893/lazymqtt/internal/app"
 	"github.com/Onizuka893/lazymqtt/internal/mqtt"
-	"github.com/Onizuka893/lazymqtt/internal/store"
 	"github.com/Onizuka893/lazymqtt/internal/ui/panel"
 )
 
@@ -286,8 +285,6 @@ func (m Model) currentMessage() *mqtt.Message {
 func matchesAny(k tea.KeyPressMsg, bindings ...key.Binding) bool {
 	return key.Matches(k, bindings...)
 }
-
-func nodeCount(s *store.Store) int { return len(s.Flatten()) }
 
 func max(a, b int) int {
 	if a > b {

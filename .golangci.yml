@@ -1,5 +1,11 @@
 version: "2"
 
+run:
+  # Without this, everything under test/integration is invisible to the
+  # linter: a whole directory that CI would never check.
+  build-tags:
+    - integration
+
 linters:
   enable:
     - depguard
@@ -12,6 +18,11 @@ linters:
     - unused
 
   settings:
+    misspell:
+      # Eclipse Mosquitto is a product name, not a misspelling of the insect.
+      ignore-rules:
+        - mosquitto
+
     depguard:
       rules:
         # The dependency direction is ui -> app -> {store, mqtt, config}.

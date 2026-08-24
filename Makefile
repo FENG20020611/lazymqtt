@@ -48,15 +48,25 @@ bench:
 golden:
 	go test ./internal/ui -update
 
+# Pinned so `make lint` and CI cannot disagree about what a lint failure is.
+# Keep in step with .github/workflows/ci.yml.
+GOLANGCI := github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1
+GOFUMPT  := mvdan.cc/gofumpt@latest
+GOVULN   := golang.org/x/vuln/cmd/govulncheck@latest
+
+# Run through `go run` rather than expecting the binaries on PATH: a `make
+# lint` that prints "command not found" and keeps going is how four lint
+# failures reached CI unnoticed.
 lint:
-	golangci-lint run
-	@test -z "$$(gofumpt -l . 2>/dev/null)" || (gofumpt -l . && exit 1)
+	go run $(GOLANGCI) run
+	@out=$$(go run $(GOFUMPT) -l .) ; \
+	if [ -n "$$out" ]; then echo "not gofumpt-formatted:" ; echo "$$out" ; exit 1 ; fi
 
 fmt:
-	gofumpt -w .
+	go run $(GOFUMPT) -w .
 
 vuln:
-	govulncheck ./...
+	go run $(GOVULN) ./...
 
 certs:
 	./deploy/certs/gen.sh

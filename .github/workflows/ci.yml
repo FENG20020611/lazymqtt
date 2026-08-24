@@ -57,44 +57,73 @@ jobs:
           cache: true
 
       - run: go vet ./...
+      # The integration suite is behind a build tag, so the line above never
+      # type-checks it. It must at least compile on every platform.
+      - run: go vet -tags=integration ./test/...
       - run: go test -race -shuffle=on ./...
 
   integration:
-    # Self-activating: runs as soon as test/integration/ exists.
     runs-on: ubuntu-latest
-    services:
-      mosquitto:
-        image: eclipse-mosquitto:2
-        ports:
-          - 1883:1883
-        options: >-
-          --health-cmd "mosquitto_sub -t '$$SYS/#' -C 1 -W 3 || exit 1"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - uses: actions/checkout@v5
-
-      - id: probe
-        run: |
-          if compgen -G "test/integration/*_test.go" > /dev/null; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::no integration tests yet, skipping"
-          fi
-        shell: bash
-
       - uses: actions/setup-go@v6
-        if: steps.probe.outputs.present == 'true'
         with:
           go-version: stable
           cache: true
 
-      - if: steps.probe.outputs.present == 'true'
-        env:
-          MQTT_BROKER_URL: tcp://localhost:1883
-        run: go test -tags=integration -race ./test/...
+      # The dev compose stack rather than a `services:` container, because the
+      # suite needs more than one broker: TLS on 8883, mutual TLS on 8884, and
+      # a password-protected broker on 1884. It is also the same stack
+      # `make test-int` uses, so a CI failure reproduces locally verbatim, and
+      # the reconnect test can restart the container by name.
+      - name: generate dev certificates
+        run: |
+          make certs
+          # mosquitto runs as uid 1883 inside the container and reads these
+          # through a read-only mount. openssl writes the keys 0600 owned by
+          # the runner, which the broker cannot read, and it then refuses to
+          # start the TLS listeners at all. Throwaway dev certs, regenerated
+          # every run.
+          chmod 0644 deploy/certs/*.pem
+
+      - name: start brokers
+        run: docker compose -f deploy/docker-compose.yml up -d
+
+      # Poll with a real PUBLISH rather than a port check: the port is
+      # listening well before the broker will answer, and a TCP-only probe
+      # turns a slow start into a confusing test failure downstream.
+      - name: wait for brokers
+        run: |
+          compose() { docker compose -f deploy/docker-compose.yml "$@"; }
+          wait_ready() {
+            svc=$1; shift
+            for i in $(seq 1 60); do
+              if compose exec -T "$svc" \
+                  mosquitto_pub -h localhost -t ci/ready -m ok "$@" \
+                  >/dev/null 2>&1; then
+                echo "$svc answering after ${i}s"
+                return 0
+              fi
+              sleep 1
+            done
+            echo "::error::$svc never became ready"
+            compose logs "$svc"
+            return 1
+          }
+          wait_ready mosquitto
+          wait_ready mosquitto-auth -u lazymqtt -P secret
+
+      # Longer than the default 10m: the retained-flood test publishes 20,000
+      # messages and the reconnect test restarts a container.
+      - run: go test -tags=integration -race -timeout 20m ./test/...
+
+      - name: broker logs
+        if: failure()
+        run: docker compose -f deploy/docker-compose.yml logs
+
+      - name: stop brokers
+        if: always()
+        run: docker compose -f deploy/docker-compose.yml down -v
 
   vuln:
     runs-on: ubuntu-latest
