@@ -58,6 +58,14 @@ type Adapter struct {
 	status  mqtt.ConnStatus
 	closed  bool
 
+	// chanMu guards the lifetime of the messages and events channels. paho
+	// runs its callbacks on goroutines this adapter does not own and cannot
+	// wait for, so a callback can still be emitting while Close runs. Senders
+	// take the read lock (their sends are non-blocking, so they never hold it
+	// for long) and Close takes the write lock before closing the channels.
+	chanMu      sync.RWMutex
+	chansClosed bool
+
 	// wg tracks goroutines this adapter spawns, so shutdown is leak-free
 	// across repeated reconnect cycles.
 	wg sync.WaitGroup
@@ -241,6 +249,11 @@ func (a *Adapter) onPublishReceived(pr paho.PublishReceived) (bool, error) {
 		Props:      props,
 	}
 
+	a.chanMu.RLock()
+	defer a.chanMu.RUnlock()
+	if a.chansClosed {
+		return true, nil
+	}
 	select {
 	case a.messages <- m:
 	default:
@@ -411,8 +424,15 @@ func (a *Adapter) setFailed(err error) {
 }
 
 // emit publishes a lifecycle event. Events are rare, so a modest buffer plus
-// a drop-on-full guard is enough to guarantee no callback ever blocks.
+// a drop-on-full guard is enough to guarantee no callback ever blocks. Late
+// callbacks arriving after Close are dropped rather than sent on a closed
+// channel.
 func (a *Adapter) emit(ev mqtt.Event) {
+	a.chanMu.RLock()
+	defer a.chanMu.RUnlock()
+	if a.chansClosed {
+		return
+	}
 	select {
 	case a.events <- ev:
 	default:
@@ -651,7 +671,10 @@ func (a *Adapter) Close() error {
 	defer cancel()
 	err := a.Disconnect(ctx)
 
+	a.chanMu.Lock()
+	a.chansClosed = true
 	close(a.messages)
 	close(a.events)
+	a.chanMu.Unlock()
 	return err
 }

@@ -160,6 +160,27 @@ func waitState(t *testing.T, c mqtt.Client, want mqtt.ConnState, timeout time.Du
 	}
 }
 
+// waitConnected polls the status until the client is connected again. Unlike
+// waitState it does not read the event channel, so it works for a client whose
+// events are being consumed by drainEvents.
+func waitConnected(t *testing.T, c *paho5.Adapter, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		st := c.Status()
+		if st.State == mqtt.StateConnected {
+			return
+		}
+		if st.State == mqtt.StateFailed {
+			t.Fatalf("connection failed while waiting to reconnect: %v", st.Err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out after %s waiting to reconnect; state is %v", timeout, st.State)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 // drainEvents consumes lifecycle events in the background so the adapter's
 // 16-slot event channel cannot back up during a long publish loop.
 func drainEvents(t *testing.T, c mqtt.Client) {

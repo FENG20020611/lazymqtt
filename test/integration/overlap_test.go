@@ -172,6 +172,9 @@ func TestDedupeSurvivesAReconnect(t *testing.T) {
 
 	dockerCompose(t, "restart", "mosquitto")
 	waitState(t, sub, mqtt.StateConnected, connectWait)
+	// The publisher lost the broker too; publishing before it is back fails
+	// with "connection with the MQTT server is currently down".
+	waitConnected(t, pub, connectWait)
 	time.Sleep(settleWait)
 
 	// Both subscriptions were replayed, so the overlap is back. One copy.
