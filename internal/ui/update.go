@@ -9,6 +9,7 @@ import (
 	"github.com/Onizuka893/lazymqtt/internal/app"
 	"github.com/Onizuka893/lazymqtt/internal/mqtt"
 	"github.com/Onizuka893/lazymqtt/internal/ui/panel"
+	"github.com/Onizuka893/lazymqtt/internal/ui/theme"
 )
 
 // Update is the single mutation point for the whole application.
@@ -23,6 +24,23 @@ import (
 //  4. Global normal-mode keys.
 //  5. The focused panel.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	next, cmd := m.update(msg)
+	// The detail pane's pretty-print is derived state: whatever moved the
+	// selection — a keypress, an ingest batch, a resume — the formatting for
+	// the newly selected message is requested from one place rather than from
+	// every branch that could have moved it.
+	if mm, ok := next.(Model); ok {
+		var fmtCmd tea.Cmd
+		mm, fmtCmd = mm.ensureFormatted()
+		if fmtCmd != nil {
+			return mm, tea.Batch(cmd, fmtCmd)
+		}
+		return mm, cmd
+	}
+	return next, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return m.resize(msg.Width, msg.Height), nil
@@ -67,10 +85,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, app.Toast(app.LevelSuccess, "published to %s", msg.Topic)
 
 	case app.FormatDoneMsg:
-		if cur := m.messages.Current(m.context()); cur != nil && cur.Seq == msg.Seq {
-			m.detail.Pretty, m.detail.PrettySeq = msg.Rendered, msg.Seq
+		if m.detail.PendingSeq == msg.Seq {
+			m.detail.PendingSeq = 0
 		}
 		m.detail.Formatting = false
+		// Record the attempt even when the payload was not JSON: PrettySeq is
+		// what stops the same message being handed to the formatter again on
+		// every frame.
+		m.detail.Pretty = msg.Rendered
+		m.detail.PrettySeq = msg.Seq
+		m.detail.PrettyJSON = msg.JSON
 		return m, nil
 
 	case app.ErrorMsg:
@@ -93,6 +117,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.store.Tick(msg.Time)
 		}
 		return m, app.TickCmd()
+
+	// The terminal answers the background-colour query asynchronously, so
+	// `theme: auto` starts dark and corrects itself within a frame or two on
+	// a light terminal. A terminal that never answers simply stays dark.
+	case tea.BackgroundColorMsg:
+		if pref := m.cfg.UI.Theme; pref == "" || pref == "auto" {
+			m.theme = theme.For(pref, msg.IsDark())
+		}
+		return m, nil
+
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
@@ -268,6 +304,34 @@ func dropToast(ts []toast, id int) []toast {
 		}
 	}
 	return out
+}
+
+// maxAutoFormatBytes bounds what is pretty-printed without being asked.
+//
+// Indenting allocates roughly twice the payload and the result is a second
+// copy held in the model, so the cap is about memory rather than time. An
+// explicit `F` ignores it: asking for it is different from getting it by
+// default.
+const maxAutoFormatBytes = 1 << 20
+
+// ensureFormatted requests a pretty-print for the selected message when one
+// is wanted and not already in hand.
+func (m Model) ensureFormatted() (Model, tea.Cmd) {
+	if !m.detail.Format {
+		return m, nil
+	}
+	cur := m.currentMessage()
+	if cur == nil {
+		return m, nil
+	}
+	if m.detail.PrettySeq == cur.Seq || m.detail.PendingSeq == cur.Seq {
+		return m, nil
+	}
+	if len(cur.Payload) > maxAutoFormatBytes || !app.MaybeJSON(cur.Payload) {
+		return m, nil
+	}
+	m.detail.PendingSeq = cur.Seq
+	return m, app.FormatCmd(cur)
 }
 
 // currentMessage returns the message the detail pane should show.

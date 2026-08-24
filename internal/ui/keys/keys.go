@@ -102,7 +102,7 @@ func Default() Map {
 		ClearTopic:  key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "clear topic")),
 		ClearAll:    key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "clear all")),
 		Wrap:        key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "wrap")),
-		Format:      key.NewBinding(key.WithKeys("F"), key.WithHelp("F", "pretty-print")),
+		Format:      key.NewBinding(key.WithKeys("F"), key.WithHelp("F", "pretty-print on/off")),
 
 		Confirm: key.NewBinding(key.WithKeys("enter"), key.WithHelp("↵", "confirm")),
 		Cancel:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),

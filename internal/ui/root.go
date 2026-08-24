@@ -186,14 +186,17 @@ func New(opts Options) Model {
 	km := keys.Default()
 
 	m := Model{
-		app:        opts.App,
-		store:      store.New(opts.Config.Limits.Store()),
-		cfg:        opts.Config,
-		keys:       &km,
-		help:       helpModel,
-		theme:      theme.Default,
-		focus:      startFocus,
-		messages:   panel.NewMessages(),
+		app:      opts.App,
+		store:    store.New(opts.Config.Limits.Store()),
+		cfg:      opts.Config,
+		keys:     &km,
+		help:     helpModel,
+		theme:    theme.For(opts.Config.UI.Theme, true),
+		focus:    startFocus,
+		messages: panel.NewMessages(),
+		// JSON is the common case for MQTT payloads, so pretty-printing is
+		// on by default; `F` turns it off for a session.
+		detail:     panel.Detail{Format: true},
 		logs:       panel.NewLogs(),
 		prompt:     &panel.Prompt{},
 		publish:    &panel.Publish{},

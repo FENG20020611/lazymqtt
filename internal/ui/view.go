@@ -19,6 +19,12 @@ func (m Model) View() tea.View {
 	v := tea.NewView("")
 	v.AltScreen = true
 	v.WindowTitle = "lazymqtt"
+	// Mouse reporting is opt-in: with it on, the terminal stops handling
+	// drag-select and middle-click paste itself, which is a trade most
+	// terminal users do not want made for them.
+	if m.cfg.UI.Mouse {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	if m.quitting {
 		return v
 	}

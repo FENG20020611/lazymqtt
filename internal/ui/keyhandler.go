@@ -241,12 +241,24 @@ func (m Model) handleNormalKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.copyTopic()
 
 	case matchesAny(k, m.keys.Format):
-		msg := m.currentMessage()
-		if msg == nil {
-			return m, nil
+		m.detail.Format = !m.detail.Format
+		m.detail = m.detail.Reset()
+		if !m.detail.Format {
+			return m, app.Toast(app.LevelInfo, "pretty-print off")
 		}
-		m.detail.Formatting = true
-		return m, app.FormatCmd(msg)
+		msg := m.currentMessage()
+		if msg == nil || !app.MaybeJSON(msg.Payload) {
+			return m, app.Toast(app.LevelInfo, "pretty-print on")
+		}
+		// An explicit request formats whatever the payload's size, which is
+		// what the on-screen indicator is for; ensureFormatted would skip a
+		// payload over maxAutoFormatBytes.
+		if m.detail.PrettySeq != msg.Seq {
+			m.detail.Formatting = true
+			m.detail.PendingSeq = msg.Seq
+			return m, app.FormatCmd(msg)
+		}
+		return m, nil
 
 	case matchesAny(k, m.keys.ClearTopic):
 		topic := m.topics.Selected()

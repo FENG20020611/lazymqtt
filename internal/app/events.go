@@ -82,10 +82,14 @@ type ToastExpiredMsg struct{ ID int }
 // Formatting a 2 MB JSON payload takes tens of milliseconds; doing it inside
 // Update would freeze input.
 type FormatDoneMsg struct {
-	Topic    string
-	Seq      uint64
+	Topic string
+	Seq   uint64
+	// Rendered is the indented text, empty when the payload was not JSON.
 	Rendered string
-	Err      error
+	// JSON reports whether the payload parsed as JSON, which is also what
+	// decides whether the detail pane syntax-highlights it.
+	JSON bool
+	Err  error
 }
 
 // ConnectedMsg confirms that a connection attempt was started.

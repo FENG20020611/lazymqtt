@@ -18,10 +18,24 @@ type Detail struct {
 
 	// Wrap soft-wraps the payload instead of truncating each line.
 	Wrap bool
+
+	// Format is the user's preference for pretty-printing JSON, toggled with
+	// `F`. It is a session-wide preference rather than per-message state:
+	// someone watching JSON telemetry wants every payload indented, not to
+	// press a key on each one.
+	Format bool
 	// Pretty holds an asynchronously formatted payload, keyed by sequence
-	// number so a stale result is never shown against a newer message.
-	Pretty     string
-	PrettySeq  uint64
+	// number so a stale result is never shown against a newer message. It is
+	// empty when the payload was not JSON, and PrettySeq still records the
+	// attempt so it is not made again.
+	Pretty    string
+	PrettySeq uint64
+	// PrettyJSON reports that Pretty is JSON and should be highlighted.
+	PrettyJSON bool
+	// PendingSeq is the message a format is in flight for, so a repeated
+	// selection does not spawn a goroutine per frame. Formatting drives the
+	// on-screen indicator and is only set for an explicit `F`.
+	PendingSeq uint64
 	Formatting bool
 }
 
@@ -105,8 +119,9 @@ func (p Detail) payloadLines(ctx Context, m *mqtt.Message, w, h int) []string {
 		return []string{ctx.Theme.Dim.Render("  formatting…")}
 	}
 	raw := m.Payload
-	if p.Pretty != "" && p.PrettySeq == m.Seq {
-		raw = []byte(p.Pretty)
+	json := false
+	if p.Format && p.Pretty != "" && p.PrettySeq == m.Seq {
+		raw, json = []byte(p.Pretty), p.PrettyJSON
 	}
 	if len(raw) == 0 {
 		return []string{ctx.Theme.Dim.Render("  (empty payload)")}
@@ -138,8 +153,24 @@ func (p Detail) payloadLines(ctx Context, m *mqtt.Message, w, h int) []string {
 	}
 	to := min(from+h, len(lines))
 	out := make([]string, 0, to-from)
+	inString := false
 	for _, l := range lines[from:to] {
-		out = append(out, ctx.Theme.Value.Render(Truncate(l, w)))
+		// Truncate before highlighting, never after: the styled string
+		// carries escape sequences that Truncate would count as columns and
+		// cut through.
+		l = Truncate(l, w)
+		if json {
+			var styled string
+			styled, inString = highlightJSON(ctx.Theme, l, inString)
+			// A string only continues across rows when the soft-wrapper
+			// split one. Without wrapping, an unterminated string means the
+			// line was truncated, and carrying that state would paint every
+			// following row as string-coloured.
+			inString = inString && p.Wrap
+			out = append(out, styled)
+			continue
+		}
+		out = append(out, ctx.Theme.Value.Render(l))
 	}
 	return out
 }
