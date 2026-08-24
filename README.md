@@ -9,6 +9,9 @@ Single static binary, Linux and macOS.
 
 ## What it does
 
+- **JSON payloads are pretty-printed and syntax-highlighted** in the detail
+  pane, automatically and off the UI goroutine, so a nested payload is
+  readable without leaving the app. `F` turns it off.
 - **Live topic tree** with per-node message counts, so the chatty topic is
   obvious at a glance. LRU-capped, so a broker publishing to
   `sensors/{uuid}/data` cannot exhaust memory.
@@ -29,12 +32,32 @@ Single static binary, Linux and macOS.
 
 ## Install
 
-Download a binary from [Releases](https://github.com/Onizuka893/lazymqtt/releases),
-or:
+Homebrew, on macOS or Linux:
+
+```sh
+brew install Onizuka893/tap/lazymqtt
+```
+
+From source, with any Go 1.25 or newer:
 
 ```sh
 go install github.com/Onizuka893/lazymqtt/cmd/lazymqtt@latest
 ```
+
+Or download an archive from
+[Releases](https://github.com/Onizuka893/lazymqtt/releases) — `linux` and
+`macOS`, `x86_64` and `arm64`, plus a best-effort Windows build. Every release
+ships a `checksums.txt`; verify before installing:
+
+```sh
+sha256sum -c checksums.txt --ignore-missing
+tar -xzf lazymqtt_0.1.0_macOS_arm64.tar.gz
+install -m 0755 lazymqtt /usr/local/bin/lazymqtt
+```
+
+The binaries are unsigned, so on macOS Gatekeeper quarantines a downloaded
+archive. The Homebrew cask clears that for you; a manual install needs
+`xattr -d com.apple.quarantine /usr/local/bin/lazymqtt`.
 
 ## Quick start
 
@@ -122,13 +145,17 @@ that scrolls away.
 | `y` / `Y` | Copy payload / topic |
 | `Space` | Pause the view (the connection stays up) |
 | `f` / `a` | Follow / autoscroll |
-| `t` / `w` / `F` | Retained-only / wrap / pretty-print |
+| `t` / `w` / `F` | Retained-only / wrap / JSON pretty-print on/off |
 | `x` / `X` | Clear topic / clear all |
 | `ctrl+l` | Logs |
 | `q` / `ctrl+c` | Quit |
 
 The help overlay is generated from the same binding registry the dispatcher
 matches on, so it cannot drift out of date.
+
+The mouse is off by default: with mouse reporting on, the terminal stops
+handling drag-select and middle-click paste itself. Set `ui.mouse: true` to
+trade that for wheel scrolling and click-to-focus.
 
 ## Scriptable subcommands
 
@@ -160,10 +187,12 @@ make test-short  # the same, minus the slow memory-ceiling tests
 make lint        # golangci-lint + gofumpt
 make test-int    # integration tests against a real broker
 make bench       # ingest, render and keypress benchmarks
+make demo        # re-record docs/demo.gif with vhs, against the dev broker
 ```
 
 Requires Go 1.25+. See [CONTRIBUTING.md](CONTRIBUTING.md) for the layering
-rules and the decisions worth knowing before changing anything.
+rules and the decisions worth knowing before changing anything, and
+[docs/releasing.md](docs/releasing.md) for how a tag becomes a release.
 
 ## Security notes
 
@@ -172,8 +201,10 @@ payload and topic passes through a sanitiser that strips `ESC`, C0/C1 controls
 and Unicode format characters before display. The raw bytes are kept in the
 store, so copy and export stay faithful.
 
-Debug logging never records payload bytes unless you set
-`logging.redact_payloads: false`.
+Debug logging never records payload bytes — no log call at any level includes
+a payload. (`logging.redact_payloads` is accepted by the config parser but is
+currently vacuous for that reason; see
+[docs/configuration.md](docs/configuration.md).)
 
 ## Licence
 

@@ -4,8 +4,9 @@ Working notes for picking this up in a fresh session. The design of record is
 [`lazymqtt_plan.md`](lazymqtt_plan.md); section references below (§n) point at it.
 
 **Last updated:** 2026-08-24
-**State:** Phases 0–9 implemented and green. Phase 10 (release) not started.
-Module path `github.com/Onizuka893/lazymqtt`, `go 1.25.0` in `go.mod`.
+**State:** Phases 0–9 implemented, green, and verified against real brokers in
+CI. Phase 10 (release) in progress. Module path
+`github.com/Onizuka893/lazymqtt`, `go 1.25.0` in `go.mod`.
 
 The `go` directive is the **minimum**, not the toolchain in use. It was 1.27
 purely because that is what the machine had installed, which broke the
@@ -22,14 +23,18 @@ gofmt -l ./cmd ./internal ./test  # empty
 
 ~8,700 lines of source, ~4,700 lines of tests, 81 Go files.
 
-`golangci-lint` is **not installed locally**, so `make lint` has not been run
-since the Phase 9 files were added. CI runs it on every push; expect it to have
-opinions about the new test files.
+`golangci-lint` and `goreleaser` are **not installed locally**, so `make lint`
+has only ever run in CI, and the release pipeline is exercised by the
+`release-dry-run` job (`goreleaser release --snapshot`) on every push rather
+than by hand.
 
-**Still not verified against a real broker.** Docker was not running in any
-session so far, so the compose stack has never started and the integration
-suite has never actually executed — it compiles and skips. This remains the
-highest-value next step; see "What is left".
+**Verified against real brokers — in CI, not locally.** The integration job
+brings the compose stack up and runs the whole suite with `-race`: plain, TLS,
+mTLS, the password-protected broker on 1884, the broker-restart reconnect test,
+the overlap/dedupe tests and the 20,000-message retained flood. It is green.
+Docker has still never run on the development machine, so `make dev` and
+`make test-int` remain unexercised as *commands*, though everything they run is
+proven in CI.
 
 ---
 
@@ -101,7 +106,7 @@ expansion, `Resolve` producing a ready-to-connect value.
 `lazymqtt config init` writes a commented starter file at mode 0600, and a test
 asserts that file parses.
 
-### Phase 3 — MQTT adapter (headless) ⚠️
+### Phase 3 — MQTT adapter (headless) ✅
 `internal/mqtt/paho5/adapter.go` implements the port on autopaho: truncation at
 ingest, `Seq` assignment, non-blocking send with a drop counter, callbacks
 mapped to events, **re-subscribe in `OnConnectionUp`** (not at startup — §12.1),
@@ -113,15 +118,12 @@ above the port.
 
 `--headless` streams one line per message to stdout.
 
-**Not verified against a real broker.** The Docker CLI is installed but the
-daemon was not running, so the compose stack has never been started. The only
-live exercise so far is a connection-refused path (correctly classified as
-retryable). **This is the highest-value next step** — start Docker Desktop and
-run `make dev`, then `make test-int`.
-
-The integration suite that will verify it now exists (Phase 9 below) and is
-written to skip, not fail, when no broker answers — so a green
-`go test ./...` today says nothing about the adapter against a real broker.
+**Verified against a real broker in CI.** The integration suite (Phase 9 below)
+exercises the adapter against mosquitto over plain TCP, TLS, mTLS and
+password auth, including the §12.1 reconnect case that asserts *messages flow
+again* after a broker restart. Note that the suite is written to skip, not
+fail, when no broker answers — so a green `go test ./...` on a machine with no
+broker still says nothing. The signal is the `integration` CI job.
 
 ### Phase 4 — bridge and coalescer ✅
 Drain loops, ticker flush, batch cap, drop propagation, context shutdown,
@@ -140,6 +142,11 @@ with one context per connection. Tests use an injected ticker and `goleak`.
   reaches the terminal. Raw bytes stay in the store so copy stays faithful.
 - `internal/ui/keys`: one binding registry feeding both the dispatcher and
   `bubbles/help`, so the help overlay cannot drift.
+- `internal/ui/theme`: a dark and a light palette built from one colour set,
+  selected by `ui.theme` or from the terminal's reported background.
+- `internal/ui/mouse.go`: opt-in wheel scrolling and click-to-focus.
+- JSON payloads pretty-printed and syntax-highlighted in the detail pane —
+  see "JSON pretty-printing in the detail pane" below.
 - Pause / follow / autoscroll / wrap / retained-only, incremental filter with
   `n`/`N`, OSC52 copy, clear topic and clear-all-with-confirmation, toasts,
   the persistent `insecure_skip_verify` banner, the reconnect countdown.
@@ -154,8 +161,7 @@ non-panicking render at 80×24 / 120×40 / 30×10 / 10×4 / 1×1 / 0×0.
 `lazymqtt [flags]`, `brokers`, `config init|check`, `pub`, `sub` (with
 `--json` emitting NDJSON), `--headless`. stdlib `flag` with a subcommand
 switch — the plan's rule is to adopt Cobra only past four real subcommands or
-when shell completions are wanted; that rule belongs in `CONTRIBUTING.md`,
-which does not exist yet.
+when shell completions are wanted; that rule is recorded in `CONTRIBUTING.md`.
 
 ### Phase 9 — hardening ✅
 - **`internal/state`** (§9.4): `state.json` under `$XDG_STATE_HOME` with an
@@ -210,19 +216,19 @@ which does not exist yet.
   single-writer and non-blocking-callback invariants, the model-size rule, the
   golden-file workflow and the perf targets.
 
-### Dev environment ⚠️
+### Dev environment ✅
 `deploy/docker-compose.yml` (mosquitto with plain/TLS/**mTLS**/websocket
 listeners, a second password-protected broker on 1884 whose password file is
 generated at startup so no hash is committed, and a seed container publishing a
 realistic retained tree), mosquitto configs, and `deploy/certs/gen.sh`.
 
-**Partially verified, in CI rather than locally.** The integration job now
-brings this stack up, and the first run exposed two file-permission bugs that
-had been latent since the stack was written — see "Fixed after the hardening
-pass". The plain broker on 1883 answers in about a second. Still unconfirmed:
-that the TLS, mTLS and auth listeners actually accept a connection, and that
-the suite passes against them. Docker has never run on the development
-machine, so `make dev` and `make test-int` remain unexercised.
+**Verified in CI rather than locally.** The integration job brings this stack
+up on every push, and the first runs exposed three real bugs that had been
+latent since the stack was written — two file-permission bugs in the compose
+setup and a data race in the adapter's shutdown path (see "Fixed after the
+hardening pass"). All four listeners now accept connections and the suite
+passes against them. Docker has never run on the development machine, so
+`make dev` and `make test-int` remain unexercised as commands.
 
 ---
 
@@ -230,45 +236,12 @@ machine, so `make dev` and `make test-int` remain unexercised.
 
 Ordered by value.
 
-### 1. Verify Phase 3 against a real broker — blocking everything else
-Start Docker Desktop (the CLI is installed; the daemon was not running), then:
-
-```
-docker compose -f deploy/docker-compose.yml up -d
-./bin/lazymqtt --headless -b tcp://localhost:1883 -t '#'
-```
-
-Expect the seeded tree to stream. Then the test that matters most: kill the
-broker container, confirm the UI shows `reconnecting…`, restart it, and
-confirm **messages flow again**. That is the §12.1 bug — after a blip the UI
-says "Connected" and nothing ever arrives — and it is silent when it happens.
-
-Also unverified: TLS and mTLS (`make certs` first), QoS 1/2 round trips and
-retained-message floods. Auth-rejection classification is now unit-tested, but
-confirm end to end against `mosquitto-auth` on port 1884 (`lazymqtt / secret`)
-that a wrong password lands in `failed` and stops rather than retrying.
-
-Run `make test-int`, which brings the stack up, runs the suite and tears it
-down. Then run the tests that need certificates:
-
-```
-make certs
-docker compose -f deploy/docker-compose.yml up -d
-go test -tags=integration -race -run 'TLS' ./test/...
-```
-
-Expect the mTLS test to be the one that surprises you: the `require_certificate
-true` listener on 8884 is new in this pass and has never accepted a connection.
-
-Two suites in there encode assumptions about broker behaviour rather than about
-our own code, so they are the ones worth reading the output of:
-`overlap_test.go` (does mosquitto send one copy per matching subscription, or
-one copy carrying every identifier?) and `reconnect_test.go`.
-
-### 2. A real soak run
-The heap ceiling is asserted over one simulated minute in
-`internal/ui/bench_test.go`, which is enough to prove the caps bound growth but
-not enough to catch slow accumulation. The §19 criterion is an hour:
+### 1. A real soak run — the last MVP acceptance criterion
+Everything else in §19 is proven. The heap ceiling is asserted over one
+*simulated* minute in `internal/ui/bench_test.go`, which is enough to prove the
+caps bound growth but not enough to catch slow accumulation. The §19 criterion
+is an hour at 5,000 msg/s over 500 topics, under 100 MB RSS, with input latency
+you cannot perceive:
 
 ```
 docker compose -f deploy/docker-compose.yml up -d
@@ -277,31 +250,159 @@ go run ./cmd/mqttload --rate 5000 --topics 500 --duration 1h &
 ```
 
 Watch RSS and the goroutine count. Also worth doing under `--pattern sawtooth`,
-and with a broker restart loop running alongside.
+and with a broker restart loop running alongside. This needs Docker running on
+a real machine — CI is the wrong place for an hour-long soak.
 
-### 3. A `pprof` pass against the render path
-`BenchmarkRenderFrame` is ~1 ms per frame with ~9,700 allocations against a
-50 ms budget, so this is not urgent — but nearly all of those allocations are
-per-row `lipgloss.Style.Render` calls, and `Store.Dirty()`/`ClearDirty()`
-already exist and are wired for the §7.4 "skip rebuilding an unchanged panel"
-optimisation that no panel consults yet. That is the fix if it ever matters.
+### 2. Phase 10 — release
+`.goreleaser.yaml` and both workflows are in place, the release pipeline is
+dry-run on every push, and `docs/configuration.md` is the documented config
+reference. What is left is the Homebrew tap and the tag; see "Phase 10
+progress" below.
 
-### 4. Phase 10 — release
-A Homebrew tap and `v0.1.0`. `.goreleaser.yaml` and both workflows are already
-in place and the release pipeline is dry-run on every push, and
-`docs/configuration.md` is the documented config reference, so what is left is
-mostly the tag and the tap.
+### 3. Record the demo GIF
+`docs/demo.tape` and `make demo` are in place; the recording itself needs
+`vhs` (which needs `ttyd` and `ffmpeg`) and the compose stack up, neither of
+which has ever run on the development machine. Once `docs/demo.gif` exists,
+add it under the README's opening paragraph:
 
-### 5. Documentation polish
-A VHS or asciinema recording for the README. The golden frames in
-`internal/ui/testdata` are a reasonable stand-in for what the app looks like in
-the meantime.
+```markdown
+![lazymqtt](docs/demo.gif)
+```
 
-### 6. Deferred by design
+The golden frames in `internal/ui/testdata` are the stand-in until then.
+
+### 4. Not blocking
+- A `pprof` pass against the render path. `BenchmarkRenderFrame` is ~1 ms per
+  frame with ~9,700 allocations against a 50 ms budget, so this is not urgent —
+  but nearly all of those allocations are per-row `lipgloss.Style.Render` calls,
+  and `Store.Dirty()`/`ClearDirty()` already exist and are wired for the §7.4
+  "skip rebuilding an unchanged panel" optimisation that no panel consults yet.
+  That is the fix if the soak ever flags it.
+- The rough edges below: credentials in a bare `--broker` URL, an in-TUI masked
+  password prompt for the broker picker, a persisted subscription set.
+
+### 5. Deferred by design
 The MQTT 3.1.1 adapter (`internal/mqtt/paho3`) with `protocol: auto`
 negotiation on CONNACK `0x84`, and everything in the §20 roadmap. The port
 interface and the `version`/`protocol` config field are already in place for
 the 3.1.1 adapter to slot into.
+
+---
+
+## Phase 10 progress
+
+Done:
+
+- **The four inert config keys are settled** — see "Config keys, settled"
+  below. This was the one item that had to land before a tag, because a
+  release freezes the schema in a way a commit does not.
+- **The Homebrew tap is configured.** `.goreleaser.yaml` gained a
+  `homebrew_casks:` block publishing `Casks/lazymqtt.rb` to
+  `Onizuka893/homebrew-tap`, so `brew install Onizuka893/tap/lazymqtt` works
+  without a `brew tap` first. It is a **cask, not a formula**: Homebrew
+  deprecated binary-only formulae and goreleaser deprecated `brews:` to match.
+  A post-install hook clears the macOS quarantine attribute — the binaries are
+  unsigned, so without it `brew install` succeeds and the first run fails with
+  a Gatekeeper dialog that explains nothing.
+- **`skip_upload: auto`**, so a prerelease tag never becomes what
+  `brew install lazymqtt` resolves to.
+- **Install docs** in `README.md`: Homebrew, `go install`, and the archive path
+  with `checksums.txt` verification and the `xattr` note.
+- **`docs/releasing.md`**: the runbook — tap setup, the token, the pre-tag
+  checklist, how to verify a release, and what to do about a bad tag.
+- **`make release-check`** (`goreleaser check`), and the config now validates
+  clean with no deprecation warnings against goreleaser v2.
+
+Left:
+
+- **Create the tap repository.** A public `Onizuka893/homebrew-tap`. It can be
+  empty; the first release commits the cask into it.
+- **Add the `HOMEBREW_TAP_GITHUB_TOKEN` secret** — a fine-grained PAT with
+  Contents: write on the tap repo only. The default `GITHUB_TOKEN` cannot push
+  to another repository. Missing, the release publishes and *only* the cask
+  step fails, which is the annoying half-done state worth avoiding.
+- **Tag `v0.1.0`.** Ideally after the soak run, since that is the §19
+  acceptance criterion and the README claims bounded memory.
+- **Record `docs/demo.gif`** and add it to the README.
+- **Verify both install paths** print the tagged version rather than `dev`.
+
+---
+
+## Config keys, settled
+
+The four keys that parsed and validated but did nothing. Each was either wired
+up or removed, because a release freezes the schema.
+
+- **`ui.theme` — implemented.** `theme.Palette` is now built from a colour set
+  rather than hard-coded, and there are two: `theme.Dark` and `theme.Light`.
+  The light set is not the dark one inverted — the pastels that read well on
+  near-black turn to mush on white, so every hue is darkened. `auto` picks from
+  `tea.BackgroundColorMsg`, which the terminal answers asynchronously: a light
+  terminal shows a dark frame or two before it corrects itself, and a terminal
+  that never answers stays dark.
+- **`ui.mouse` — implemented, shallowly.** `View` asks for
+  `tea.MouseModeCellMotion` only when the key is set; the wheel scrolls the
+  focused panel (or the open overlay, never the panel behind it) and a left
+  click focuses the panel under the pointer. It stays **off by default**
+  because mouse reporting takes drag-select and middle-click paste away from
+  the terminal, which is not a trade to make on someone's behalf.
+  `internal/ui/mouse.go`, with a test pinning the hit-test to the same
+  arithmetic `ComputeLayout` uses.
+- **`protocol` — now refused rather than ignored.** `3.1.1` is a validation
+  error naming the reason. Accepting it and connecting with v5 anyway was the
+  worst of the options: the connection succeeds, so nothing looks wrong, and
+  the user concludes their broker speaks v5. `auto` and `5` are accepted, and
+  `auto` stays correct when a 3.1.1 adapter lands.
+- **`logging.redact_payloads` — removed.** It was vacuous, and a latent trap:
+  the first person to log a payload would not know they were supposed to check
+  it. Payloads are simply never logged, which is now stated in the reference
+  instead of implied by a key. Because `DisallowUnknownField()` means a
+  removed key is a parse error, `config.removed` maps it to a hint explaining
+  what happened — a bare "unknown field" reads like a typo.
+
+---
+
+## JSON pretty-printing in the detail pane
+
+Was a manual, colourless `F` press; is now automatic and highlighted (§20 puts
+this in v0.2 — it was pulled forward).
+
+- **Automatic.** `Model.Update` wraps the real update and calls
+  `ensureFormatted` once, so whatever moved the selection — a keypress, an
+  ingest batch, a resume — the request is issued from one place rather than
+  from every branch that could have moved it. `F` is now a session-wide
+  preference toggle rather than a one-shot.
+- **Off the UI goroutine**, as it always was: a 14 MB payload takes tens of
+  milliseconds to indent, which is a visible stall inside `Update`. The
+  in-flight sequence number stops a goroutine being spawned per frame while
+  the selection sits still.
+- **Only the cheap test runs on the UI goroutine.** `app.MaybeJSON` looks at
+  the first non-space byte; the full `json.Valid` happens on the command
+  goroutine. Under `follow` the selected message changes twenty times a
+  second, and validating a megabyte at that rate costs frames.
+- **Capped at 1 MiB for the automatic path** (`maxAutoFormatBytes`). Indenting
+  allocates roughly twice the payload and the result is held in the model, so
+  the cap is about memory rather than time. An explicit `F` ignores it.
+- **A non-JSON payload is not copied into the model.** `FormatCmd` returns an
+  empty string in that case; returning the payload verbatim would have the UI
+  hold a second copy of every message it displays.
+- **Highlighting is per visible line**, in `internal/ui/panel/jsoncolor.go`,
+  for the same reason `payloadLines` windows the payload: the pane must cost
+  what it displays, not what it holds. The lexer carries exactly one bit
+  across a line boundary — whether a soft-wrapped string is still open — and
+  that bit is dropped when wrapping is off, where an unterminated string means
+  the line was truncated rather than continued.
+- Keys and string values get different colours, because that is the whole
+  point; a test asserts they never converge, and another asserts highlighting
+  changes styling only, never the text, since the pane has already truncated
+  each line to the panel width.
+- The golden frames are ANSI-stripped and so cannot see any of this, which is
+  why `TestJSONIsHighlighted` exists.
+- **Cost:** `BenchmarkKeypress` went from 687 ns / 2 allocs to ~1.1 µs / 4,
+  because `ensureFormatted` resolves the selected message on every Update. That
+  is 2% of the 50 ms frame budget and buys the guarantee that no branch can
+  forget to request formatting; if it ever matters, the fix is to compare the
+  selection anchor rather than resolve the message.
 
 ---
 
@@ -436,27 +537,36 @@ Two items the Phase 9 review turned up, both correctness rather than polish.
     script now marks them 0644, which is fine for throwaway certificates that
     `.gitignore` keeps out of the repository.
 
-**The overlap behaviour is unverified against a real broker.** MQTT 5 §3.3.4
+**The overlap behaviour is now verified against mosquitto.** MQTT 5 §3.3.4
 lets a broker send either one copy carrying every matching identifier or one
-copy per subscription; the unit tests cover both shapes, but which one
-mosquitto actually does is still an assumption.
-`test/integration/overlap_test.go` is the test that settles it.
+copy per subscription; the unit tests cover both shapes, and
+`test/integration/overlap_test.go` — green in CI, including across a broker
+restart — confirms the dedupe holds against a real broker either way.
+
+- **A data race on shutdown, found by the integration job.** `Close` closed the
+  `messages` and `events` channels while paho's own callback goroutines could
+  still be inside `emit`/`onPublishReceived`. `a.wg` does not track those
+  goroutines — paho owns them — so `wg.Wait()` never covered the case, and it
+  was a send-on-closed-channel panic waiting to happen, not merely a race
+  report. A `chanMu sync.RWMutex` plus a `chansClosed` flag now guards the
+  channels' lifetime: senders take the read lock (their sends are non-blocking,
+  so they never hold it) and drop the value if the channels are already closed;
+  `Close` takes the write lock after `Disconnect` returns.
+- **`TestDedupeSurvivesAReconnect` published through a client that had not
+  reconnected yet.** After restarting mosquitto it waited only for the
+  *subscriber* to come back, then published on the publisher — which had lost
+  the broker too. Intermittent `connection with the MQTT server is currently
+  down`. The publisher's events are consumed by `drainEvents`, so `waitState`
+  cannot be used on it; `waitConnected` polls `Adapter.Status()` instead.
 
 ## Known rough edges
 
-- **Four config keys parse and validate but do nothing.** Writing the reference
-  in `docs/configuration.md` was what surfaced them, and they are listed there
-  under "accepted but not yet implemented" rather than quietly documented as
-  working:
-  - `defaults.protocol` / `brokers.*.protocol` reach `Options.Protocol` and
-    stop; the v5 adapter is always selected. `app.DefaultClientFactory` is the
-    switch point.
-  - `ui.theme` is validated against `auto|dark|light` and then never read; the
-    dark palette is always used.
-  - `ui.mouse` is never read.
-  - `logging.redact_payloads` is vacuous — no log call at any level includes a
-    payload, so there is nothing to redact. It is a latent trap: the first
-    person to log a payload will not know they were supposed to check it.
+- The light palette is **untested against a real light terminal**. The colours
+  were chosen for contrast on paper; `theme: light` has only ever been rendered
+  into a test buffer.
+- Mouse support is deliberately shallow: wheel scrolling and click-to-focus.
+  There is no drag, no click-to-select-a-row, and no click on the tree's
+  expand arrows.
 - Dedupe across overlapping subscriptions is implemented for MQTT 5 only, and
   **it depends on the broker supporting subscription identifiers**. A broker
   that advertises `SubIDAvailable: false` in its CONNACK gets no identifiers

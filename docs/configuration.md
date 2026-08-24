@@ -21,7 +21,7 @@ and formatting are safe; UI state goes to a separate `state.json`
 - [Credentials](#credentials)
 - [TLS](#tls)
 - [Validation](#validation)
-- [Accepted but not yet implemented](#accepted-but-not-yet-implemented)
+- [Removed keys](#removed-keys)
 - [Environment variables](#environment-variables)
 - [Files lazymqtt writes](#files-lazymqtt-writes)
 
@@ -75,7 +75,7 @@ defaults:
   keepalive: 30s
   connect_timeout: 10s
   clean_start: true
-  protocol: auto                    # auto | 5 | 3.1.1
+  protocol: auto                    # auto | 5 (3.1.1 is not supported yet)
   subscriptions:
     - filter: "#"
       qos: 0
@@ -90,14 +90,13 @@ limits:
 ui:
   refresh_ms: 50
   timestamp_format: "15:04:05.000"
-  theme: auto                       # not yet implemented
+  theme: auto                       # auto | dark | light
   start_panel: topics
-  mouse: false                      # not yet implemented
+  mouse: false                      # wheel scrolling and click-to-focus
 
 logging:
   level: warn                       # debug | info | warn | error
   file: ""                          # empty = no file logging, never stdout
-  redact_payloads: true
 
 brokers:
   local:
@@ -130,7 +129,7 @@ Applied to every broker that does not override them.
 | `keepalive` | duration | `30s` | |
 | `connect_timeout` | duration | `10s` | |
 | `clean_start` | bool | `true` | `false` resumes a persistent session. |
-| `protocol` | string | `auto` | `auto`, `5`, `3.1.1`. Not yet implemented — see [below](#accepted-but-not-yet-implemented). |
+| `protocol` | string | `auto` | `auto` or `5`. `3.1.1` is **rejected**: only the MQTT 5 adapter ships. |
 | `subscriptions` | list | `[{filter: "#", qos: 0}]` | Subscribed on connect. |
 
 **Durations are strings.** `30s`, `1m`, `500ms`. A bare `keepalive: 30` is an
@@ -199,9 +198,9 @@ sustained rate.
 |---|---|---|---|
 | `refresh_ms` | int | `50` | Coalescer flush interval. Valid range 10–2000. |
 | `timestamp_format` | string | `15:04:05.000` | Go reference-time layout. |
-| `theme` | string | `auto` | `auto`, `dark`, `light`. Not yet implemented. |
+| `theme` | string | `auto` | `auto`, `dark`, `light`. `auto` follows the terminal's background. |
 | `start_panel` | string | `topics` | `topics`, `messages`, `detail`, `subscriptions`. |
-| `mouse` | bool | `false` | Not yet implemented. |
+| `mouse` | bool | `false` | Wheel scrolling and click-to-focus. Off by default — see below. |
 
 `refresh_ms` is the single most important performance knob, and it is a frame
 budget rather than a poll interval: messages accumulate in a batch and are
@@ -219,6 +218,17 @@ The displayed time is **local arrival time**. MQTT carries no publish
 timestamp, so it cannot be anything else — a message delayed in a queue for an
 hour is timestamped when lazymqtt saw it.
 
+`theme: auto` asks the terminal for its background colour and picks the dark or
+light palette from the answer. The query is asynchronous, so a light terminal
+shows one or two dark frames before it corrects itself, and a terminal that
+never answers stays dark. `dark` and `light` skip the query.
+
+`mouse` is off by default on purpose. With mouse reporting on, the terminal
+stops handling drag-select and middle-click paste itself, so turning it on
+trades "select text with the mouse" for "scroll and click panels with the
+mouse". When it is on, the wheel scrolls the focused panel (or the open
+overlay) and a left click focuses the panel under the pointer.
+
 ## `logging`
 
 A file is the only destination. Writing to stdout or stderr while the alt
@@ -228,15 +238,15 @@ screen is up corrupts the display, so there is no option to do it.
 |---|---|---|---|
 | `level` | string | `warn` | `debug`, `info`, `warn`, `error`. |
 | `file` | path | `""` | Empty disables file logging. Created mode 0600. |
-| `redact_payloads` | bool | `true` | Currently vacuous — see below. |
 
 Logs are always visible in-app on the logs panel (`L`) regardless of `file`,
 held in a bounded ring. `--debug` or `LAZYMQTT_DEBUG=1` forces `level: debug`.
 
-`redact_payloads` is honoured trivially today: **nothing writes a payload to
-the log at any level**, so there is nothing to redact. The key exists so that
-the intent is on record — a payload is attacker-controlled data and a log file
-outlives the session that produced it.
+Payloads are never logged, at any level. There is no key to control that,
+because there is nothing to control: a payload is attacker-controlled data and
+a log file outlives the session that produced it, so it does not go in.
+(`logging.redact_payloads` existed briefly and did nothing; it was removed
+before v0.1.0.)
 
 ## `brokers`
 
@@ -280,7 +290,7 @@ brokers:
 | `connect_timeout` | duration | from `defaults` | |
 | `clean_start` | bool | from `defaults` | |
 | `session_expiry` | uint32 | `0` | MQTT 5 session expiry, in seconds. |
-| `protocol` | string | from `defaults` | Not yet implemented. |
+| `protocol` | string | from `defaults` | `auto` or `5`; `3.1.1` is rejected. |
 | `username` | string | — | |
 | `password` | string | — | Plaintext. See [Credentials](#credentials). |
 | `password_env` | string | — | Name of an environment variable. |
@@ -411,18 +421,14 @@ per run is miserable. Errors prevent startup; warnings do not.
 - port 8883, or a `tls://`/`mqtts://` URL, while `tls.enabled` is `false`
 - `insecure_skip_verify` enabled
 
-## Accepted but not yet implemented
+## Removed keys
 
-These parse and validate, so a config using them loads cleanly, but they have
-no effect yet. They are listed here rather than removed because removing them
-would be a breaking schema change and each is planned.
+A key that once existed and no longer does produces an unknown-field error with
+a hint naming it, rather than a bare "unknown field" that reads like a typo.
 
-| Key | Status |
-|---|---|
-| `defaults.protocol`, `brokers.*.protocol` | Carried through to the client but ignored; the MQTT 5 adapter is always selected. The 3.1.1 adapter and `auto` negotiation are planned. |
-| `ui.theme` | Validated but unread; the dark palette is always used. |
-| `ui.mouse` | Unread. Mouse support is post-1.0. |
-| `logging.redact_payloads` | Vacuous: nothing logs payloads today. |
+| Key | Removed in | Why |
+|---|---|---|
+| `logging.redact_payloads` | v0.1.0 | Nothing logged a payload at any level, so the key never did anything. Delete the line. |
 
 ## Environment variables
 
