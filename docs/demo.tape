@@ -18,7 +18,9 @@ Set FontSize 15
 Set Width 1400
 Set Height 800
 Set Padding 12
-Set Theme "Tokyo Night"
+# The exact name matters: VHS matches its theme list literally, and
+# `vhs validate` does not check it — only a real recording does.
+Set Theme "TokyoNight"
 Set TypingSpeed 60ms
 # The GIF is decoration, not documentation: 12 fps and a modest window keep it
 # small enough that GitHub will actually inline it.
