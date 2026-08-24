@@ -248,6 +248,11 @@ go test -tags=integration -race -run 'TLS' ./test/...
 Expect the mTLS test to be the one that surprises you: the `require_certificate
 true` listener on 8884 is new in this pass and has never accepted a connection.
 
+Two suites in there encode assumptions about broker behaviour rather than about
+our own code, so they are the ones worth reading the output of:
+`overlap_test.go` (does mosquitto send one copy per matching subscription, or
+one copy carrying every identifier?) and `reconnect_test.go`.
+
 ### 2. A real soak run
 The heap ceiling is asserted over one simulated minute in
 `internal/ui/bench_test.go`, which is enough to prove the caps bound growth but
@@ -372,15 +377,55 @@ All four were found by tests written in this phase, not by using the app.
 Both perf fixes were invisible in normal use and would have shown up as "the
 app feels sluggish" long after the cause was forgettable.
 
+## Fixed after the hardening pass
+
+Two items the Phase 9 review turned up, both correctness rather than polish.
+
+- **A panic on a spawned goroutine killed the process with the terminal still
+  in raw mode.** §13 asks for `recover()` in every goroutine the app spawns,
+  and the bridge had it, but the adapter's deferred-SUBSCRIBE goroutine did
+  not — and `main`'s deferred recover cannot catch a panic on another
+  goroutine. That goroutine runs on every connection-up, so it was on the
+  reconnect path. All adapter goroutines now go through `Adapter.spawn`, which
+  recovers, logs with a stack, and reports an `EventError` instead of dying.
+- **Overlapping subscriptions double-counted every message** (§11, pitfall
+  14). `#` plus `devices/+/state` means mosquitto delivers a matching message
+  once per subscription, so the message list showed it twice and the counts
+  and header rate were inflated — with lazymqtt looking like it was inventing
+  traffic. `internal/mqtt/paho5/dedupe.go` now tags each subscription with an
+  MQTT 5 subscription identifier and keeps only the copy from the
+  lowest-numbered matching subscription.
+  - Identifiers are per-filter and stable across reconnects, so the canonical
+    choice cannot flip mid-session and make counts jump.
+  - Only *active* subscriptions are candidates. Letting a rejected or
+    not-yet-SUBACK'd filter be canonical would suppress *every* copy rather
+    than one, turning an overlap into silence.
+  - The snapshot is an `atomic.Pointer`, not mutex-guarded state, because the
+    check runs in `OnPublishReceived` on the client's read loop (§21 pitfall
+    2). Payloads are never compared: two identical messages published twice
+    are two messages, and hiding the second is lying about the broker.
+  - This forced one SUBSCRIBE packet per filter, since MQTT 5 carries the
+    identifier on the packet rather than per filter. That costs a round trip
+    per filter on the reconnect replay and removes the request/reason-code
+    index matching, which was the fiddly part of the old code.
+
+**The overlap behaviour is unverified against a real broker.** MQTT 5 §3.3.4
+lets a broker send either one copy carrying every matching identifier or one
+copy per subscription; the unit tests cover both shapes, but which one
+mosquitto actually does is still an assumption.
+`test/integration/overlap_test.go` is the test that settles it.
+
 ## Known rough edges
 
 - `Options.Protocol` is parsed and carried but nothing acts on it: the v5
   adapter is always selected. `app.DefaultClientFactory` is the switch point.
-- Dedupe across overlapping subscriptions (§11, pitfall 14) is **not
-  implemented**. With both `#` and `devices/+/state` active, MQTT 3.1.1
-  delivers a matching message once per subscription and the counts will
-  double. The MQTT 5 subscription identifier is already carried on
-  `Properties.SubIdentifiers` and is the intended fix.
+- Dedupe across overlapping subscriptions is implemented for MQTT 5 only, and
+  **it depends on the broker supporting subscription identifiers**. A broker
+  that advertises `SubIDAvailable: false` in its CONNACK gets no identifiers
+  and no dedupe, so `#` plus `devices/+/state` will double-count there. The
+  3.1.1 adapter will need a different strategy; there is no identifier to key
+  on, so it would have to be a payload-and-arrival-window heuristic, which is
+  exactly the kind of thing that hides genuine republishes.
 - `Store.Stats()` recomputes the node count by walking the tree on every call,
   and `View` calls it every frame. Fine at 5,000 nodes, worth caching if the
   profiling pass flags it.

@@ -2,6 +2,7 @@ package paho5
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,6 +47,39 @@ func TestClosingAnAdapterThatNeverConnectedLeavesNothingRunning(t *testing.T) {
 	// deferred close in main can both reach it.
 	if err := a.Close(); err != nil {
 		t.Fatalf("second Close: %v", err)
+	}
+}
+
+// A panic on a goroutine the adapter spawned cannot be caught by main's
+// deferred recover — it takes the process down with the terminal still in raw
+// mode and the alt screen active. The deferred SUBSCRIBE runs on such a
+// goroutine, on every single connection-up, so this is on the reconnect path.
+func TestAPanicOnASpawnedGoroutineIsReportedNotFatal(t *testing.T) {
+	a := New(mqtt.Options{ServerURL: "tcp://127.0.0.1:1", ClientID: "panic-test"}, nil)
+	t.Cleanup(func() { _ = a.Close() })
+
+	a.spawn(func() { panic("subscribe went wrong") })
+
+	select {
+	case ev := <-a.Events():
+		if ev.Kind != mqtt.EventError {
+			t.Fatalf("got event %v, want an error event", ev.Kind)
+		}
+		if ev.Err == nil || !strings.Contains(ev.Err.Error(), "subscribe went wrong") {
+			t.Fatalf("error %v does not carry the panic value", ev.Err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a panicking goroutine reported nothing; the UI would show no sign of it")
+	}
+
+	// The WaitGroup must still be balanced, or Close hangs forever on a
+	// panic — which is its own way of leaving the terminal broken.
+	done := make(chan struct{})
+	go func() { a.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("wg.Wait blocked after a panic; Close would hang")
 	}
 }
 

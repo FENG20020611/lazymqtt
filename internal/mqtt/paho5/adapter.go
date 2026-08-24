@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,8 +36,25 @@ type Adapter struct {
 	seq     atomic.Uint64
 	dropped atomic.Uint64
 
+	deduped atomic.Uint64
+
+	// subIDOK records whether the broker advertised support for subscription
+	// identifiers in its CONNACK. paho rejects a SUBSCRIBE carrying one when
+	// the server said no, so this starts false and is only raised once a
+	// CONNACK has actually said otherwise.
+	subIDOK atomic.Bool
+
+	// canonical is an immutable snapshot of the active (identifier, filter)
+	// pairs, lowest identifier first. onPublishReceived reads it to decide
+	// which copy of an overlapping delivery to keep, and it is an atomic
+	// pointer rather than mutex-guarded state because that callback runs on
+	// the client's read loop and must never block — §21 pitfall 2.
+	canonical atomic.Pointer[[]subFilter]
+
 	mu      sync.Mutex
 	desired []mqtt.Subscription // the app's desired set, re-applied on every EventUp
+	subIDs  map[string]int      // filter → subscription identifier, stable across reconnects
+	nextID  int
 	status  mqtt.ConnStatus
 	closed  bool
 
@@ -63,6 +81,7 @@ func New(opts mqtt.Options, log *slog.Logger) *Adapter {
 		log:      log,
 		messages: make(chan *mqtt.Message, opts.IngestBuffer),
 		events:   make(chan mqtt.Event, 16),
+		subIDs:   make(map[string]int),
 		status: mqtt.ConnStatus{
 			State:        mqtt.StateDisconnected,
 			Broker:       opts.ServerURL,
@@ -183,6 +202,20 @@ func (a *Adapter) onPublishReceived(pr paho.PublishReceived) (bool, error) {
 	if p == nil {
 		return false, nil
 	}
+	props := convertProperties(p.Properties)
+	// Before copying the payload: a duplicate we are about to discard should
+	// not cost an allocation the size of the message.
+	if a.isDuplicateDelivery(p.Topic, props) {
+		if n := a.deduped.Add(1); n == 1 {
+			// Once per session, so the user can tell the difference between
+			// "lazymqtt is dropping messages" and "your subscriptions
+			// overlap". Logging every one would block the read loop.
+			a.log.Info("overlapping subscriptions: keeping one copy of each delivery",
+				"topic", p.Topic)
+		}
+		return true, nil
+	}
+
 	orig := len(p.Payload)
 	payload := p.Payload
 	truncated := false
@@ -205,7 +238,7 @@ func (a *Adapter) onPublishReceived(pr paho.PublishReceived) (bool, error) {
 		Retained:   p.Retain,
 		Duplicate:  p.Duplicate(),
 		ReceivedAt: time.Now(),
-		Props:      convertProperties(p.Properties),
+		Props:      props,
 	}
 
 	select {
@@ -250,6 +283,12 @@ func (a *Adapter) onConnectionUp(cm *autopaho.ConnectionManager, connack *paho.C
 	if connack != nil {
 		a.status.SessionPresent = connack.SessionPresent
 	}
+	// paho refuses to send a SUBSCRIBE carrying a subscription identifier if
+	// the broker said it does not support them, so ask before assuming. An
+	// absent property means "supported": that is the protocol default.
+	if connack != nil {
+		a.subIDOK.Store(connack.Properties == nil || connack.Properties.SubIDAvailable)
+	}
 	status := a.status
 	desired := append([]mqtt.Subscription(nil), a.desired...)
 	a.mu.Unlock()
@@ -261,13 +300,39 @@ func (a *Adapter) onConnectionUp(cm *autopaho.ConnectionManager, connack *paho.C
 	}
 	// The callback must not block, so the SUBSCRIBE goes out on its own
 	// goroutine, tracked so shutdown stays leak-free.
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
+	a.spawn(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		// The outcome is reported as a SubAck event, not through this return.
 		_ = a.subscribe(ctx, cm, desired)
+	})
+}
+
+// spawn runs fn on a tracked goroutine that cannot take the process down with
+// it. A panic on a goroutine we spawned is not recoverable by main's deferred
+// recover, so without this an unexpected nil would kill the process while the
+// terminal is still in raw mode with the alt screen active — §21 pitfall 11,
+// which is about the *whole* app, not just main. Every goroutine this package
+// starts must go through here.
+func (a *Adapter) spawn(fn func()) {
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		defer func() {
+			r := recover()
+			if r == nil {
+				return
+			}
+			err := fmt.Errorf("panic in mqtt adapter: %v", r)
+			a.log.Error("adapter goroutine panicked",
+				"panic", r, "stack", string(debug.Stack()))
+			a.mu.Lock()
+			a.status.Err = err
+			status := a.status
+			a.mu.Unlock()
+			a.emit(mqtt.Event{Kind: mqtt.EventError, Status: status, Err: err})
+		}()
+		fn()
 	}()
 }
 
@@ -389,17 +454,40 @@ func (a *Adapter) Subscribe(ctx context.Context, subs []mqtt.Subscription) error
 	return a.subscribe(ctx, cm, subs)
 }
 
+// subscribe applies filters one SUBSCRIBE packet at a time.
+//
+// Batching them would be one round trip instead of several, but MQTT 5 carries
+// the subscription identifier on the SUBSCRIBE *packet*, not per filter
+// (§3.8.2.1.2) — so a batched subscribe gives every filter in it the same
+// identifier, and the dedupe in dedupe.go could no longer tell which
+// subscription a delivery came from. Subscriptions are user-driven and few,
+// and the app already subscribes one filter at a time; the only batch is the
+// reconnect replay. A SUBACK per filter also removes the index-matching
+// between request and reason codes, which was the fiddly part.
 func (a *Adapter) subscribe(ctx context.Context, cm *autopaho.ConnectionManager, subs []mqtt.Subscription) error {
-	if len(subs) == 0 {
-		return nil
-	}
-	opts := make([]paho.SubscribeOptions, 0, len(subs))
+	var firstErr error
 	for _, s := range subs {
-		opts = append(opts, paho.SubscribeOptions{Topic: s.Filter, QoS: s.QoS})
+		if err := a.subscribeOne(ctx, cm, s); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
-	ack, err := cm.Subscribe(ctx, &paho.Subscribe{Subscriptions: opts})
-	result := make([]mqtt.Subscription, len(subs))
-	copy(result, subs)
+	return firstErr
+}
+
+func (a *Adapter) subscribeOne(ctx context.Context, cm *autopaho.ConnectionManager, sub mqtt.Subscription) error {
+	a.mu.Lock()
+	id := a.subIDLocked(sub.Filter)
+	a.mu.Unlock()
+
+	pkt := &paho.Subscribe{
+		Subscriptions: []paho.SubscribeOptions{{Topic: sub.Filter, QoS: sub.QoS}},
+	}
+	if a.subIDOK.Load() {
+		pkt.Properties = &paho.SubscribeProperties{SubscriptionIdentifier: &id}
+	}
+
+	ack, err := cm.Subscribe(ctx, pkt)
+	result := []mqtt.Subscription{sub}
 	if err != nil {
 		// A subscribe issued before CONNACK, or while reconnecting, is not a
 		// failure: the desired set is already recorded and OnConnectionUp
@@ -407,34 +495,43 @@ func (a *Adapter) subscribe(ctx context.Context, cm *autopaho.ConnectionManager,
 		// time the app starts.
 		if errors.Is(err, autopaho.ConnectionDownError) {
 			a.log.Debug("subscribe deferred until the connection is up",
-				"filters", len(subs))
+				"filter", sub.Filter)
 			return nil
 		}
-		for i := range result {
-			result[i].Active, result[i].Err = false, err
-		}
+		result[0].Active, result[0].Err = false, err
+		a.mu.Lock()
+		a.applyResultLocked(result)
+		a.mu.Unlock()
 		a.emit(mqtt.Event{Kind: mqtt.EventSubAck, Subs: result, Err: err, Status: a.Status()})
 		return err
 	}
-	for i := range result {
-		if ack != nil && i < len(ack.Reasons) {
-			code := ack.Reasons[i]
-			if code > 2 {
-				result[i].Active = false
-				result[i].Err = fmt.Errorf("subscribe rejected: %s", mqtt.ReasonText(code))
-			} else {
-				result[i].Active = true
-				result[i].GrantedQoS = code
-			}
+	if ack != nil && len(ack.Reasons) > 0 {
+		code := ack.Reasons[0]
+		if code > 2 {
+			result[0].Active = false
+			result[0].Err = fmt.Errorf("subscribe rejected: %s", mqtt.ReasonText(code))
 		} else {
-			result[i].Active = true
-			result[i].GrantedQoS = result[i].QoS
+			result[0].Active = true
+			result[0].GrantedQoS = code
 		}
-		if result[i].CreatedAt.IsZero() {
-			result[i].CreatedAt = time.Now()
-		}
+	} else {
+		result[0].Active = true
+		result[0].GrantedQoS = result[0].QoS
 	}
+	if result[0].CreatedAt.IsZero() {
+		result[0].CreatedAt = time.Now()
+	}
+
 	a.mu.Lock()
+	a.applyResultLocked(result)
+	a.mu.Unlock()
+	a.emit(mqtt.Event{Kind: mqtt.EventSubAck, Subs: result, Status: a.Status()})
+	return nil
+}
+
+// applyResultLocked folds SUBACK outcomes into the desired set and refreshes
+// the dedupe snapshot. Callers must hold a.mu.
+func (a *Adapter) applyResultLocked(result []mqtt.Subscription) {
 	for _, r := range result {
 		for i := range a.desired {
 			if a.desired[i].Filter == r.Filter {
@@ -447,9 +544,7 @@ func (a *Adapter) subscribe(ctx context.Context, cm *autopaho.ConnectionManager,
 			}
 		}
 	}
-	a.mu.Unlock()
-	a.emit(mqtt.Event{Kind: mqtt.EventSubAck, Subs: result, Status: a.Status()})
-	return nil
+	a.rebuildCanonicalLocked()
 }
 
 // Unsubscribe drops filters from the desired set and tells the broker.
@@ -469,6 +564,13 @@ func (a *Adapter) Unsubscribe(ctx context.Context, filters []string) error {
 		}
 	}
 	a.desired = kept
+	// Drop the identifiers too, so the map is bounded by the active
+	// subscriptions rather than by how many times the user has changed their
+	// mind. Re-subscribing to the same filter simply gets a fresh one.
+	for _, f := range filters {
+		delete(a.subIDs, f)
+	}
+	a.rebuildCanonicalLocked()
 	cm := a.cm
 	a.mu.Unlock()
 

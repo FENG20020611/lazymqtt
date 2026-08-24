@@ -44,7 +44,10 @@ Two invariants follow from it, both worth defending in review:
   `tea.Cmd` goroutine or from a paho callback.
 - **Paho callbacks never block.** `onPublishReceived` does one non-blocking
   channel send and returns. Blocking it stalls ack processing until the broker
-  disconnects a client that appears to be doing nothing wrong.
+  disconnects a client that appears to be doing nothing wrong. This is why the
+  dedupe table it consults is an `atomic.Pointer` to an immutable snapshot
+  rather than mutex-guarded state — taking `a.mu` there would contend with
+  every subscribe and status update.
 
 ## Layering
 
@@ -72,6 +75,13 @@ corrupts the alt screen. The standard `log` package is redirected to
 `io.Discard` in `logging.Setup`, and paho's loggers are adapted into slog. If
 you need to tell the user something, use a toast or the logs panel. (§16)
 
+**Every goroutine recovers.** A panic on a goroutine you spawned cannot be
+caught by `main`'s deferred recover — it takes the process down with the
+terminal still in raw mode and the alt screen active, which is the one failure
+mode a TUI must never have. `internal/app` has `Bridge.run` and
+`internal/mqtt/paho5` has `Adapter.spawn`; use them rather than a bare `go`.
+(§13, §21 pitfall 11)
+
 **Never rewrite `config.yaml`.** It is a file the user hand-edited and
 commented. UI preferences go in `internal/state`, which writes a separate
 `state.json` and holds no credentials. (§9.4, §21 pitfall 18)
@@ -92,6 +102,17 @@ that is what `y` copies.
 slices the raw payload to the visible window *before* sanitising it. Sanitising
 first and slicing after is the natural order and it makes a 10 MB payload take
 seconds per frame.
+
+**One SUBSCRIBE packet per filter.** MQTT 5 carries the subscription identifier
+on the SUBSCRIBE packet, not per filter (§3.8.2.1.2), so batching filters gives
+them all the same identifier and `paho5/dedupe.go` can no longer tell which
+subscription a delivery came from. Batching would save round trips only on the
+reconnect replay, and correctness beats that.
+
+**Never dedupe messages by comparing payloads.** Two identical messages
+published twice are two messages. Suppressing the second one makes the viewer
+lie about the broker, which is worse than showing a duplicate. Dedupe keys on
+the subscription identifier or it does not happen.
 
 ## Tests
 
