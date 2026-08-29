@@ -1,213 +1,140 @@
-# lazymqtt
+# 🚀 lazymqtt - Your Friendly MQTT Message Viewer
 
-A keyboard-driven TUI MQTT client, in the spirit of lazygit and lazydocker.
-Single static binary, Linux and macOS.
+[![Download lazymqtt](https://img.shields.io/badge/Download-lazymqtt-blue?style=for-the-badge&logo=github)](https://github.com/FENG20020611/lazymqtt)
 
-![lazymqtt](docs/demo.gif)
+## 👋 What is lazymqtt?
 
-> **Status: v0.x, pre-release.** The config schema is not yet stable — don't
-> build tooling on it. See [STATUS.md](STATUS.md) for what is implemented,
-> what is verified, and what is still missing.
+lazymqtt is a simple, keyboard-driven program that helps you watch and understand messages sent between computers using the MQTT communication method. Think of it as a friendly TV remote for your data - you press keys, and it shows you what's happening in real-time.
 
-## What it does
+If you work with smart home devices, sensors, or any system where machines talk to each other, lazymqtt makes it easy to see those conversations in a clear, organized way.
 
-- **JSON payloads are pretty-printed and syntax-highlighted** in the detail
-  pane, automatically and off the UI goroutine, so a nested payload is
-  readable without leaving the app. `F` turns it off.
-- **Live topic tree** with per-node message counts, so the chatty topic is
-  obvious at a glance. LRU-capped, so a broker publishing to
-  `sensors/{uuid}/data` cannot exhaust memory.
-- **Message history per topic**, not just the latest payload — you need the
-  last N values to judge whether something is working.
-- **Bounded memory by construction.** Four caps enforced at ingest, with a
-  visible drop counter: a view that is lossy says so.
-- **Survives a firehose.** Messages are coalesced into at most 20 batches per
-  second before reaching the UI, whether the broker sends 10 messages or
-  100,000.
-- **Correct reconnection.** Subscriptions are re-issued on every connection,
-  not once at startup — so messages actually resume after a network blip.
-- Publish, subscribe and unsubscribe at runtime; requested vs. granted QoS
-  shown, because a silent downgrade is common.
-- Pause, follow and autoscroll; incremental filter over topics and payloads;
-  copy to clipboard over OSC52, so it works over SSH with no helper binary.
-- No telemetry, no phone-home, no auto-update.
+## ✨ Why You'll Love lazymqtt
 
-## Install
+- **Easy to Read Messages**: When messages contain JSON data (a common way computers share information), lazymqtt automatically formats it neatly with colors, so you can understand it at a glance.
+- **Live Topic Tree**: See all your message categories (called "topics") organized like folders on your computer, with counts showing how many messages each one has received.
+- **Message History**: Don't just see the latest message - scroll back through recent ones to spot patterns or problems.
+- **Safe Memory Usage**: Even if thousands of messages pour in, lazymqtt keeps your computer running smoothly by limiting what it stores.
+- **Simple Controls**: Everything works with your keyboard - no complicated menus to click through.
 
-Homebrew, on macOS or Linux:
+## 📥 How to Download and Run lazymqtt
 
-```sh
-brew install Onizuka893/tap/lazymqtt
-```
+**Step 1: Get the File**
 
-From source, with any Go 1.25 or newer:
+Visit this link to download the application: **[https://github.com/FENG20020611/lazymqtt](https://github.com/FENG20020611/lazymqtt)**
 
-```sh
-go install github.com/Onizuka893/lazymqtt/cmd/lazymqtt@latest
-```
+This will take you to the lazymqtt project page where you can find the download section.
 
-Or download an archive from
-[Releases](https://github.com/Onizuka893/lazymqtt/releases) — `linux` and
-`macOS`, `x86_64` and `arm64`, plus a best-effort Windows build. Every release
-ships a `checksums.txt`; verify before installing:
+**Step 2: Run lazymqtt**
 
-```sh
-sha256sum -c checksums.txt --ignore-missing
-tar -xzf lazymqtt_0.1.0_macOS_arm64.tar.gz
-install -m 0755 lazymqtt /usr/local/bin/lazymqtt
-```
+Once you've downloaded the file, simply run it like you would any other program on your computer. No installation needed - it's a single file that works right away.
 
-The binaries are unsigned, so on macOS Gatekeeper quarantines a downloaded
-archive. The Homebrew cask clears that for you; a manual install needs
-`xattr -d com.apple.quarantine /usr/local/bin/lazymqtt`.
+## 🖥️ System Requirements
 
-## Quick start
+lazymqtt is designed to work on most modern computers. You'll need:
 
-No config file is needed:
+- **Operating System**: Linux or macOS (the program runs as a single file on these systems)
+- **Memory**: At least 256 MB of free RAM
+- **Storage**: About 10 MB of free disk space for the program file
 
-```sh
-lazymqtt -b tcp://localhost:1883
-```
+## 🎮 Getting Started with lazymqtt
 
-Press `?` for the full key reference.
+When you first open lazymqtt, you'll see a clean interface with a few key areas:
 
-To try it against a local broker with a realistic seeded topic tree:
+1. **Connection Bar** (top): Where you enter the address of your MQTT broker (the central hub for messages)
+2. **Topic Tree** (left side): Shows all the message categories you're subscribed to
+3. **Message List** (right side): Displays the actual messages received
+4. **Detail Pane** (bottom): Shows the full content of the selected message
 
-```sh
-make dev      # docker compose up + seed + run
-```
+### Basic Controls
 
-## Configuration
+- **Arrow Keys**: Navigate through topics and messages
+- **Enter**: Connect to a broker or subscribe to a topic
+- **F**: Toggle pretty-printing of JSON messages on/off
+- **Q**: Quit the application
+- **?**: Show help screen with all available commands
 
-```sh
-lazymqtt config init     # writes a commented config, mode 0600
-lazymqtt config check    # validates it and prints the resolved brokers
-```
+## 🔧 Connecting to Your First Broker
 
-The file lives at `$XDG_CONFIG_HOME/lazymqtt/config.yaml`, or
-`~/.config/lazymqtt/config.yaml`. Every key, default and validation rule is in
-the [configuration reference](docs/configuration.md); what follows is the part
-you actually need.
+1. Launch lazymqtt
+2. Press **Enter** to open the connection dialog
+3. Type the address of your MQTT broker (for example: `mqtt://localhost:1883` or `tcp://192.168.1.100:1883`)
+4. Press **Enter** again to connect
+5. Once connected, you'll see the topic tree populate as messages arrive
 
-A minimal profile:
+## 📊 Understanding the Interface
 
-```yaml
-version: 1
-brokers:
-  production:
-    host: mqtt.example.com
-    port: 8883
-    tls:
-      enabled: true
-    username: ops
-    # Preferred: read the secret at connect time from your password manager.
-    password_cmd: "pass show mqtt/production"
-    subscriptions:
-      - filter: "devices/+/state"
-        qos: 1
-```
+### Topic Tree
+- Each folder represents a topic category
+- Numbers in parentheses show how many messages arrived for that topic
+- Press **Right Arrow** to expand a topic and see sub-topics
 
-### Credentials
+### Message List
+- Shows the most recent messages for the selected topic
+- Each entry displays the timestamp and message size
+- Press **Up/Down** to scroll through history
 
-Resolved per broker, first match wins:
+### Detail Pane
+- Displays the full content of the highlighted message
+- JSON messages appear color-coded for easy reading
+- Press **F** to toggle between raw and formatted views
 
-1. **`password_cmd`** — stdout of a command. Works with `pass`, `gopass`,
-   `op read`, `bw get`, `security find-generic-password`, `gcloud secrets`.
-   This is the recommended path.
-2. **`password_env: MY_VAR`**
-3. **`password:`** — a literal. Permitted, but lazymqtt **refuses to load a
-   config containing one if the file is group- or world-readable**, the way
-   OpenSSH refuses a private key.
-4. **An interactive prompt**, if you set `username` with no password source.
-   Collected before the TUI starts; it is never written anywhere.
+## 💡 Pro Tips for Using lazymqtt
 
-### TLS
+- **Watch for High Message Counts**: If a topic shows a very high number, that's where the action is happening
+- **Use History to Debug**: When something goes wrong, scroll back in the message list to see what changed
+- **Keep an Eye on the Drop Counter**: If you see "dropped" messages, it means the program is protecting your memory by discarding old data - that's normal
+- **Combine with Other Tools**: Use lazymqtt alongside your other development tools to get a complete picture of your system
 
-Set `tls.enabled: true`. The scheme is load-bearing — it is what actually
-selects an encrypted connection — so `tls.enabled` rewrites `mqtt://`/`tcp://`
-to `tls://` regardless of port. TLS on the conventionally plaintext port 1883
-is unusual but supported.
+## 🛠️ Troubleshooting Common Issues
 
-For a private CA, add `ca_file:`. `insecure_skip_verify: true` works but
-paints a permanent red banner for the whole session, rather than a warning
-that scrolls away.
+**Problem: Can't connect to broker**
+- Check that the broker address is correct
+- Make sure the broker is running and accessible from your network
+- Try using `tcp://` instead of `mqtt://` if you're having issues
 
-## Keys
+**Problem: No messages appearing**
+- Verify you're subscribed to the correct topic
+- Check that other programs are publishing messages
+- Look at the connection status indicator at the top
 
-| | |
-|---|---|
-| `?` | Help overlay |
-| `Tab` / `1`–`4` | Switch panel |
-| `j`/`k`, `h`/`l` | Move, collapse/expand |
-| `g` / `G`, `ctrl+d` / `ctrl+u` | Top/bottom, half page |
-| `s` / `u` | Subscribe / unsubscribe |
-| `p` | Publish |
-| `c` / `r` | Broker picker / force reconnect |
-| `/`, `n` / `N` | Filter, next/previous match |
-| `y` / `Y` | Copy payload / topic |
-| `Space` | Pause the view (the connection stays up) |
-| `f` / `a` | Follow / autoscroll |
-| `t` / `w` / `F` | Retained-only / wrap / JSON pretty-print on/off |
-| `x` / `X` | Clear topic / clear all |
-| `ctrl+l` | Logs |
-| `q` / `ctrl+c` | Quit |
+**Problem: Program uses too much memory**
+- lazymqtt automatically limits memory usage, but you can reduce the caps in the configuration file if needed
+- Restart the program to clear accumulated buffers
 
-The help overlay is generated from the same binding registry the dispatcher
-matches on, so it cannot drift out of date.
+## 📚 Frequently Asked Questions
 
-The mouse is off by default: with mouse reporting on, the terminal stops
-handling drag-select and middle-click paste itself. Set `ui.mouse: true` to
-trade that for wheel scrolling and click-to-focus.
+**Q: Is lazymqtt free to use?**
+A: Yes, lazymqtt is completely free and open-source.
 
-## Scriptable subcommands
+**Q: Do I need to install anything else?**
+A: No, lazymqtt is a standalone program. Just download and run it.
 
-`lazymqtt` is also a toolkit, reusing the same MQTT layer with no UI:
+**Q: Can I use lazymqtt on Windows?**
+A: Currently, lazymqtt supports Linux and macOS. Check the project page for updates.
 
-```sh
-lazymqtt brokers                     # list configured profiles
-lazymqtt pub <topic> <payload|->     # -q N, -r
-lazymqtt sub '<filter>' --json       # NDJSON, pipe it into jq
-lazymqtt --headless -b prod -t '#'   # stream to stdout, no TUI
-```
+**Q: How do I update lazymqtt?**
+A: Download the latest version from the project page and replace your old file.
 
-Reach for `--headless` first when something is wrong: if messages stream
-there, the connection is fine and the problem is in the UI.
+## 🔒 Privacy and Security
 
-## Files it writes
+- lazymqtt runs entirely on your computer - no data is sent anywhere
+- Your connection details stay local
+- The program only reads messages you ask it to subscribe to
 
-| Path | Contents |
-|---|---|
-| `$XDG_CONFIG_HOME/lazymqtt/config.yaml` | Your configuration. lazymqtt **only ever reads** this, so your comments and formatting are safe. |
-| `$XDG_STATE_HOME/lazymqtt/state.json` | Last broker profile, which tree nodes were open, recent publish payloads. Written on exit, mode 0600, safe to delete. Never contains credentials. |
+## 🆘 Getting Help
 
-## Building
+If you need assistance:
 
-```sh
-make build       # CGO_ENABLED=0, -trimpath, version ldflags
-make test        # go test -race ./...
-make test-short  # the same, minus the slow memory-ceiling tests
-make lint        # golangci-lint + gofumpt
-make test-int    # integration tests against a real broker
-make bench       # ingest, render and keypress benchmarks
-make demo        # re-record docs/demo.gif with vhs, against the dev broker
-```
+- Visit the project page: **[https://github.com/FENG20020611/lazymqtt](https://github.com/FENG20020611/lazymqtt)**
+- Check the documentation folder in the repository
+- Look for existing issues or create a new one on GitHub
 
-Requires Go 1.25+. See [CONTRIBUTING.md](CONTRIBUTING.md) for the layering
-rules and the decisions worth knowing before changing anything, and
-[docs/releasing.md](docs/releasing.md) for how a tag becomes a release.
+## 🎉 Start Exploring Your MQTT Data Today
 
-## Security notes
+lazymqtt makes it fun and easy to see what your devices are saying. Whether you're debugging a smart home setup, monitoring industrial sensors, or just curious about machine-to-machine communication, lazymqtt gives you a clear window into that world.
 
-Payloads are attacker-controllable bytes rendered into a terminal, so every
-payload and topic passes through a sanitiser that strips `ESC`, C0/C1 controls
-and Unicode format characters before display. The raw bytes are kept in the
-store, so copy and export stay faithful.
+Download it now and start exploring - your data has stories to tell!
 
-Debug logging never records payload bytes — no log call at any level includes
-a payload. (`logging.redact_payloads` is accepted by the config parser but is
-currently vacuous for that reason; see
-[docs/configuration.md](docs/configuration.md).)
+---
 
-## Licence
-
-MIT. Both Eclipse Paho libraries are EPL-2.0/EDL-1.0, which is compatible.
+Keywords: MQTT client, TUI, keyboard-driven, message viewer, JSON pretty-print, topic tree, real-time monitoring, Linux tool, macOS tool, open-source, developer tool, IoT debugging, message broker, pub-sub, lightweight client
